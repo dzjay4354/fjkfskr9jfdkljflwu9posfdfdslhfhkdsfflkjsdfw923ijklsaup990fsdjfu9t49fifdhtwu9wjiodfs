@@ -88,7 +88,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 10px;
+    padding: 10px 10px 36px 10px; /* bottom padding reserves space for draft banner */
     gap: 8px;
   }
 
@@ -431,7 +431,7 @@
     display: flex; align-items: center; gap: 7px;
     padding: 3px 2px;
   }
-  .legend-sym { width: 16px; height: 12px; flex-shrink: 0; }
+  .legend-sym { width: 12px; height: 12px; min-width: 12px; min-height: 12px; flex-shrink: 0; }
   .legend-lbl { flex: 1; color: #1a1a2e; font-family: Arial, sans-serif; font-size: 11px; }
   .legend-toggle { transform: scale(0.85); transform-origin: right center; }
 
@@ -832,6 +832,11 @@
 <header>
   <div class="logo">EXPOSURE REPORTER</div>
   <div class="subtitle">an LGA Analysis</div>
+  <!-- TEMPORARY — remove for final product -->
+  <div style="background:#e05c5c;color:#fff;font-size:10px;font-family:Arial,monospace;font-weight:700;
+              padding:3px 10px;border-radius:4px;letter-spacing:0.05em;margin-left:8px">
+    ⚠ DRAFT — PROOF OF CONCEPT ONLY
+  </div>
   <div class="spacer"></div>
   <div class="status-pill" id="statusPill">IDLE</div>
 </header>
@@ -2039,10 +2044,16 @@ function renderPolyList() {
         <div class="draw-pulse"></div>
         <span id="drawModeLabel">Editing…</span>
       </div>
-      <button class="btn btn-ghost" onclick="cancelEditing()"
-              style="margin-top:6px;font-size:11px;padding:5px 8px;border-color:var(--danger);color:var(--danger)">
-        ✕ Cancel edit
-      </button>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-primary" onclick="completeEditing()"
+                style="font-size:11px;padding:5px 8px;flex:1">
+          ✓ Complete edit
+        </button>
+        <button class="btn btn-ghost" onclick="cancelEditing()"
+                style="font-size:11px;padding:5px 8px;border-color:var(--danger);color:var(--danger);flex:1">
+          ✕ Cancel edit
+        </button>
+      </div>
     </div>`;
 }
 
@@ -2164,19 +2175,57 @@ async function onDrawCreated(e) {
 function startEditingPoly(idx) {
   const layers = state.drawnItems.getLayers();
   if (!layers[idx]) return;
-  state._editingIdx = idx;
-  const tempGroup = new L.FeatureGroup([layers[idx]]).addTo(state.map);
-  state._editTempGroup = tempGroup;
+  state._editingIdx   = idx;
+  state._editingLayer = layers[idx];
+
+  // Edit directly on drawnItems — no temp group needed
+  // Hide all other layers during edit to avoid confusion
+  state.drawnItems.eachLayer((l, i) => {
+    if (l !== layers[idx]) l.setStyle({ opacity: 0.2, fillOpacity: 0.05 });
+  });
+
   state.editHandler = new L.EditToolbar.Edit(state.map, {
-    featureGroup: tempGroup,
+    featureGroup: state.drawnItems,
     selectedPathOptions: { color: '#2d7592', dashArray: '4 4', fillOpacity: 0.2 }
   });
   state.editHandler.enable();
   state.isEditing = true;
   showDrawMode(`Editing ${layers[idx]._polyLabel || 'polygon'}…`);
-  // Show cancel edit in the manage section
   const row = document.getElementById('editModeRow');
   if (row) row.style.display = 'block';
+}
+
+function completeEditing() {
+  if (state.editHandler) {
+    state.editHandler.save();
+    state.editHandler.disable();
+    state.editHandler = null;
+  }
+  // Restore all polygon styles
+  state.drawnItems.eachLayer(l => {
+    if (l.setStyle) l.setStyle({ color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' });
+  });
+  if (state._editTempGroup) {
+    state.map.removeLayer(state._editTempGroup);
+    state._editTempGroup = null;
+  }
+  state.isEditing     = false;
+  state._editingIdx   = null;
+  state._editingLayer = null;
+  hideDrawMode();
+  const row = document.getElementById('editModeRow');
+  if (row) row.style.display = 'none';
+
+  // Small delay to let Leaflet.draw commit the edited coordinates before reading them
+  setTimeout(() => {
+    unionDrawnLayers().then(unioned => {
+      if (unioned) {
+        log(`Edit complete — new AOI verts: ${countVertices(unioned)}`, 'ok');
+        setAOI(unioned, 'draw');
+      }
+      renderPolyList();
+    });
+  }, 50);
 }
 
 function cancelEditing() {
@@ -2189,8 +2238,13 @@ function cancelEditing() {
     state.map.removeLayer(state._editTempGroup);
     state._editTempGroup = null;
   }
-  state.isEditing    = false;
-  state._editingIdx  = null;
+  // Restore all polygon styles
+  state.drawnItems.eachLayer(l => {
+    if (l.setStyle) l.setStyle({ color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' });
+  });
+  state.isEditing     = false;
+  state._editingIdx   = null;
+  state._editingLayer = null;
   hideDrawMode();
   const row = document.getElementById('editModeRow');
   if (row) row.style.display = 'none';
@@ -2692,7 +2746,7 @@ async function runAnalysis() {
       log(`Population fetch failed: ${e.message}`, 'error');
     }
 
-    // ── Layer D: Address Points — bbox fetch + exact intersection, count ──
+    // ── Layer D: Address Points — spatial filter fetch + exact PIP ──
     setProgress(fill, lbl, 92, 'Fetching Address Points within AOI…');
     await tick();
 
@@ -2717,7 +2771,6 @@ async function runAnalysis() {
 
         const page = data.features || [];
         addrPoints = addrPoints.concat(page);
-        // Continue if: service explicitly says exceeded, OR we got a full page (may be more)
         exceeded = data.exceededTransferLimit === true || page.length === pageSize;
         offset += page.length;
         if (page.length === 0) break;
@@ -2726,7 +2779,7 @@ async function runAnalysis() {
         await tick();
       }
 
-      log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact intersection…`, 'info');
+      log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact PIP…`, 'info');
 
       // Exact intersection + count per LGA
       const cfg = CONFIG.layers.D;
@@ -2774,6 +2827,26 @@ async function runAnalysis() {
         setProgress(fill, lbl, 96 + Math.round((i / lgaNames.length) * 3), `Intersection areas: ${i+1} / ${lgaNames.length}…`);
         await tick();
       }
+    }
+
+    // ── Calculate area outside any LGA boundary ───────────────
+    const totalLGAArea = Object.entries(results)
+      .filter(([k]) => k !== 'Outside LGA')
+      .reduce((s,[,c]) => s + (c.lgaArea||0), 0);
+    const totalAOIArea = areaKm2(analysisAOI);
+    const outsideArea  = Math.max(0, totalAOIArea - totalLGAArea);
+
+    // Merge with any "Outside LGA" entries from findLGA fallback
+    const outsideKey = 'Outside LGA';
+    if (!results[outsideKey]) results[outsideKey] = { A:0, B:0, E:0, F:0, C:0, D:0, state:'', stateCode:'99', lgaCode:'99999', lgaArea:0 };
+    results[outsideKey].lgaArea = (results[outsideKey].lgaArea || 0) + outsideArea;
+    if (results[outsideKey].lgaArea === 0 && results[outsideKey].A === 0 &&
+        results[outsideKey].B === 0 && results[outsideKey].E === 0 &&
+        results[outsideKey].F === 0 && results[outsideKey].C === 0 &&
+        results[outsideKey].D === 0) {
+      delete results[outsideKey]; // remove if truly empty
+    } else {
+      log(`Outside LGA: ${results[outsideKey].lgaArea.toLocaleString()} sq km`, 'info');
     }
 
     state.reportData = Object.entries(results).map(([lga, c]) => ({
@@ -2900,15 +2973,37 @@ function showReport(historyEntry) {
   const totalD = data.reduce((s,r) => s+r.countD, 0);
   const max = Math.max(...data.map(r => Math.max(r.countA, r.countHospital, r.countF, r.countC, r.countD)));
 
+  // Separate Outside LGA record — must be declared before outsideRow uses it
+  const outsideRecord = data.find(r => r.lga === 'Outside LGA');
+  const validData     = data.filter(r => r.lga !== 'Outside LGA');
+
+  const numCell = (val) =>
+    `<td class="num">${val != null ? val.toLocaleString() : '—'}</td>`;
+
+  // Outside LGA row
+  const outsideRow = outsideRecord ? `<tr style="border-top:2px solid #ccd0d5;background:#f8f8f8;font-style:italic">
+      <td style="color:#888;font-family:Arial,monospace;font-size:10px;text-transform:uppercase">Outside</td>
+      <td style="color:#888;font-size:11px">Outside</td>
+      <td class="lga-name" style="color:#888">Outside</td>
+      ${numCell(outsideRecord.lgaArea != null ? Math.round(outsideRecord.lgaArea) : null)}
+      ${numCell(outsideRecord.countA)}
+      ${numCell(outsideRecord.countHospital)}
+      ${numCell(outsideRecord.countB)}
+      ${numCell(outsideRecord.countE)}
+      ${numCell(outsideRecord.countF)}
+      ${numCell(outsideRecord.countC)}
+      ${numCell(outsideRecord.countD)}
+    </tr>` : '';
+
   document.getElementById('reportTimestamp').textContent =
     historyEntry.timestamp.toLocaleString('en-AU', { dateStyle:'medium', timeStyle:'short' });
 
   // Build structured rows matching CSV output: Total → States → LGAs grouped by state
   const totalArea = Math.round(parseFloat(historyEntry.aoiArea || 0));
 
-  // Group by state
+  // Group valid data by state
   const byState = {};
-  for (const r of data) {
+  for (const r of validData) {
     const s = r.stateName || 'Unknown';
     if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
     byState[s].lgas.push(r);
@@ -2928,9 +3023,6 @@ function showReport(historyEntry) {
     countC:        grp.lgas.reduce((s,r) => s+r.countC, 0),
     countD:        grp.lgas.reduce((s,r) => s+r.countD, 0)
   })).sort((a,b) => (parseInt(a.stateCode)||0) - (parseInt(b.stateCode)||0));
-
-  const numCell = (val) =>
-    `<td class="num">${val != null ? val.toLocaleString() : '—'}</td>`;
 
   // Total row
   const totalRow = `<tr style="background:#dde3ea;font-weight:700;border-bottom:2px solid #ccd0d5">
@@ -3005,7 +3097,7 @@ function showReport(historyEntry) {
         <th>Population</th>
         <th>Addresses</th>
       </tr></thead>
-      <tbody>${totalRow}${allStateRows}${allLGARows}</tbody>
+      <tbody>${totalRow}${allStateRows}${allLGARows}${outsideRow}</tbody>
     </table></div>`;
 
   document.getElementById('reportModal').classList.add('open');
@@ -3050,7 +3142,11 @@ function exportCSV() {
   const cols = ['Reporting Level','State','Location Name','AOI Area (sq km)','Aged Care','Hospitals (Total)','Public Hospitals','Private Hospitals','Power Stations','Est. Population (2025)','Address Points'];
   const vals = (level, st, name, r, area='') => [level, st, name, area, r.countA, r.countHospital, r.countB, r.countE, r.countF, r.countC, r.countD];
 
-  // Grand total
+  // Separate Outside LGA from valid data
+  const csvOutside  = data.find(r => r.lga === 'Outside LGA');
+  const csvValid    = data.filter(r => r.lga !== 'Outside LGA');
+
+  // Grand total (all data including outside)
   const grand = {
     countA:        data.reduce((s,r)=>s+r.countA,0),
     countHospital: data.reduce((s,r)=>s+r.countHospital,0),
@@ -3061,9 +3157,9 @@ function exportCSV() {
     countD:        data.reduce((s,r)=>s+r.countD,0)
   };
 
-  // Group LGAs by state, track stateCode per group
+  // Group valid LGAs by state
   const byState = {};
-  for (const r of data) {
+  for (const r of csvValid) {
     const s = r.stateName || 'Unknown';
     if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
     byState[s].lgas.push(r);
@@ -3105,6 +3201,11 @@ function exportCSV() {
     for (const r of sortedLgas) {
       rows.push(vals('LGA', r.stateName, r.lga, r, r.lgaArea));
     }
+  }
+
+  // Outside LGA row at the bottom
+  if (csvOutside) {
+    rows.push(vals('Outside', 'Outside', 'Outside', csvOutside, csvOutside.lgaArea ?? ''));
   }
 
   const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
@@ -3413,5 +3514,80 @@ document.addEventListener('click', e => {
 });
 window.addEventListener('load', initMap);
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TEMPORARY — DRAFT BANNER + SPLASH SCREEN                    -->
+<!-- Remove this entire block for final product                  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+
+<!-- Bottom draft banner -->
+<div style="position:fixed;bottom:0;left:0;right:0;z-index:9999;
+            background:#e05c5c;color:#fff;text-align:center;
+            font-family:Arial,monospace;font-size:11px;font-weight:700;
+            padding:5px;letter-spacing:0.05em;pointer-events:none">
+  ⚠ &nbsp; DRAFT PROOF OF CONCEPT — NOT FOR OPERATIONAL USE — DATA AND RESULTS UNVALIDATED &nbsp; ⚠
+</div>
+
+<!-- Splash modal -->
+<div id="splashScreen" style="
+  position:fixed;inset:0;z-index:99999;
+  background:rgba(0,0,0,0.55);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;font-family:Arial,sans-serif;">
+
+  <div style="
+    background:#003E5A;
+    border:1px solid #00797A;
+    border-radius:12px;
+    max-width:480px;width:100%;
+    box-shadow:0 8px 40px rgba(0,0,0,0.5);
+    overflow:hidden;">
+
+    <!-- Header bar -->
+    <div style="background:#00797A;padding:14px 24px;display:flex;align-items:center;gap:10px">
+      <div style="font-size:18px;font-weight:900;letter-spacing:0.06em;color:#fff">
+        EXPOSURE REPORTER
+      </div>
+      <div style="font-size:10px;background:#f2af00;color:#003E5A;font-weight:800;
+                  padding:2px 8px;border-radius:3px;letter-spacing:0.06em;white-space:nowrap">
+        DRAFT
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:24px 24px 20px">
+      <div style="font-size:13px;font-weight:700;color:#f2af00;margin-bottom:10px;letter-spacing:0.04em">
+        ⚠ &nbsp; Important Notice
+      </div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.75">
+        This tool is a <strong style="color:#fff">draft proof of concept</strong> for evaluation
+        and testing purposes only.
+        <br><br>
+        Data sources, spatial analysis methods, and results have
+        <strong style="color:#fff">not been validated</strong> for operational use.
+        Results should not be used to inform decisions without independent verification.
+        <br><br>
+        Functionality, data, and outputs may change without notice.
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:0 24px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="font-size:10px;color:rgba(255,255,255,0.35);line-height:1.4">
+        For evaluation purposes only<br>Not for operational use
+      </div>
+      <button onclick="document.getElementById('splashScreen').style.display='none'"
+              style="background:#f2af00;color:#003E5A;border:none;border-radius:6px;
+                     padding:10px 24px;font-size:12px;font-weight:800;cursor:pointer;
+                     letter-spacing:0.05em;white-space:nowrap;flex-shrink:0"
+              onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+        I Understand
+      </button>
+    </div>
+
+  </div>
+</div>
+<!-- END TEMPORARY DRAFT BLOCK -->
+
 </body>
 </html>
