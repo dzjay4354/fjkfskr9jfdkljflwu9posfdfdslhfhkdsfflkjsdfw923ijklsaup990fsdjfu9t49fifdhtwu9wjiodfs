@@ -88,7 +88,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 10px 10px 36px 10px; /* bottom padding reserves space for draft banner */
+    padding: 10px;
     gap: 8px;
   }
 
@@ -159,6 +159,34 @@
     flex-direction: column;
     overflow: hidden;
   }
+
+  /* Data Sources panel — sized to its content, never grows to consume the
+     space results-panel needs. Collapsed by default (see dataSourcesBody
+     display:none in the HTML) so it's available without crowding history. */
+  .data-sources-panel {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .data-sources-header:hover .section-label { color: var(--accent); }
+  .data-sources-panel.open #dataSourcesChevron { transform: rotate(90deg); }
+
+  .source-item {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 11px;
+  }
+  .source-item:last-child { border-bottom: none; }
+  .source-name {
+    font-weight: 600; color: var(--text); font-size: 12px;
+    display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  }
+  .source-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .source-meta {
+    color: var(--muted); font-size: 10px; font-family: Arial, monospace;
+    line-height: 1.6; padding-left: 14px;
+  }
+  .source-meta a { color: var(--accent); text-decoration: none; }
+  .source-meta a:hover { text-decoration: underline; }
 
   .panel {
     background: var(--surface);
@@ -431,7 +459,7 @@
     display: flex; align-items: center; gap: 7px;
     padding: 3px 2px;
   }
-  .legend-sym { width: 12px; height: 12px; min-width: 12px; min-height: 12px; flex-shrink: 0; }
+  .legend-sym { width: 16px; height: 12px; flex-shrink: 0; }
   .legend-lbl { flex: 1; color: #1a1a2e; font-family: Arial, sans-serif; font-size: 11px; }
   .legend-toggle { transform: scale(0.85); transform-origin: right center; }
 
@@ -616,6 +644,116 @@
   /* Map */
   .map-wrap { flex: 1; position: relative; border-radius: 10px; overflow: hidden; border: 1px solid #003E5A; }
   #map { width: 100%; height: 100%; background: var(--chart-bg); }
+
+  /* Toast notifications — non-blocking alerts for data-source failures.
+     Unlike .busy-overlay these never capture clicks on the map; only the
+     toast card itself is interactive (for its dismiss button). */
+  .toast {
+    pointer-events: all;
+    background: #2a1410;
+    border: 1px solid #b94527;
+    border-left: 4px solid #b94527;
+    border-radius: 6px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    display: flex; gap: 8px; align-items: flex-start;
+    animation: toast-in 0.25s ease-out;
+  }
+  .toast.leaving { animation: toast-out 0.2s ease-in forwards; }
+  @keyframes toast-in {
+    0%   { transform: translateX(24px); opacity: 0; }
+    100% { transform: translateX(0);    opacity: 1; }
+  }
+  @keyframes toast-out {
+    0%   { transform: translateX(0);    opacity: 1; max-height: 200px; }
+    100% { transform: translateX(24px); opacity: 0; max-height: 0; margin: 0; padding-top: 0; padding-bottom: 0; }
+  }
+  .toast-icon { font-size: 15px; color: #f2af00; flex-shrink: 0; line-height: 1.3; }
+  .toast-body { flex: 1; min-width: 0; }
+  .toast-title {
+    font-family: Arial, sans-serif; font-size: 12px; font-weight: 700;
+    color: #fff; margin-bottom: 2px;
+  }
+  .toast-text {
+    font-family: Arial, sans-serif; font-size: 11px;
+    color: rgba(255,255,255,0.8); line-height: 1.4;
+  }
+  .toast-close {
+    background: transparent; border: none; color: rgba(255,255,255,0.5);
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 2px; flex-shrink: 0;
+  }
+  .toast-close:hover { color: #fff; }
+
+  /* Busy overlay — sits above the map (and everything else inside map-wrap)
+     during long-running operations. pointer-events:all blocks clicks/drags
+     from reaching Leaflet underneath so people can't queue up interactions
+     against an unresponsive map. */
+  .busy-overlay {
+    position: absolute; inset: 0;
+    z-index: 1500;
+    background: rgba(0, 20, 30, 0.45);
+    display: none;
+    align-items: center; justify-content: center;
+    pointer-events: all;
+    cursor: wait;
+  }
+  .busy-overlay.visible { display: flex; }
+  #aoiDoneOverlay { cursor: default; }
+  .busy-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    min-width: 220px;
+  }
+  .busy-spinner {
+    width: 32px; height: 32px;
+    border: 3px solid rgba(255,255,255,0.15);
+    border-top-color: var(--accent2);
+    border-radius: 50%;
+    animation: busy-spin 0.8s linear infinite;
+  }
+  @keyframes busy-spin { to { transform: rotate(360deg); } }
+  .busy-done-check {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(63,185,80,0.15);
+    border: 2px solid #3fb950;
+    color: #3fb950;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700;
+    animation: busy-done-pop 0.25s ease-out;
+  }
+  @keyframes busy-done-pop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    100% { transform: scale(1);   opacity: 1; }
+  }
+  .busy-timer {
+    font-family: Arial, monospace; font-size: 20px; font-weight: 700;
+    color: var(--accent2); letter-spacing: 0.03em;
+    font-variant-numeric: tabular-nums; /* keeps digits from jittering width as they change */
+  }
+  .busy-text {
+    font-family: Arial, sans-serif; font-size: 13px; font-weight: 600;
+    color: var(--text); text-align: center;
+  }
+  .busy-subtext {
+    font-family: Arial, monospace; font-size: 11px;
+    color: var(--muted); text-align: center; max-width: 280px;
+    line-height: 1.4;
+  }
+  .busy-warning {
+    font-family: Arial, sans-serif; font-size: 11px; font-weight: 600;
+    color: var(--warn); text-align: center; max-width: 260px;
+    line-height: 1.4;
+    margin-top: 6px; padding-top: 10px;
+    border-top: 1px solid rgba(242,175,0,0.25);
+  }
 
   /* Floating AOI confirmation bar */
   .aoi-confirm-bar {
@@ -832,11 +970,6 @@
 <header>
   <div class="logo">EXPOSURE REPORTER</div>
   <div class="subtitle">an LGA Analysis</div>
-  <!-- TEMPORARY — remove for final product -->
-  <div style="background:#e05c5c;color:#fff;font-size:10px;font-family:Arial,monospace;font-weight:700;
-              padding:3px 10px;border-radius:4px;letter-spacing:0.05em;margin-left:8px">
-    ⚠ DRAFT — PROOF OF CONCEPT ONLY
-  </div>
   <div class="spacer"></div>
   <div class="status-pill" id="statusPill">IDLE</div>
 </header>
@@ -870,6 +1003,8 @@
             <div>Drop file or click to browse</div>
             <div class="upload-hint">GeoJSON · KML · Shapefile (.zip) — adds to AOI</div>
           </div>
+          <div class="progress-bar" id="uploadProgress"><div class="progress-fill" id="uploadProgressFill"></div></div>
+          <div class="progress-label" id="uploadProgressLabel"></div>
         </div>
 
         <!-- AOI: Draw -->
@@ -925,11 +1060,29 @@
       </div>
     </div><!-- /results-panel -->
 
+    <!-- Data Sources Panel — collapsed by default so it doesn't compete with
+         Session History for vertical space; expands to show where every
+         layer's data comes from and how current it is. -->
+    <div class="panel data-sources-panel" id="dataSourcesPanel">
+      <div class="panel-section data-sources-header" onclick="toggleDataSources()"
+           style="flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none">
+        <div class="section-label" style="margin-bottom:0">◈ Data Sources</div>
+        <span id="dataSourcesChevron" style="font-size:9px;color:var(--muted);transition:transform 0.2s">▶</span>
+      </div>
+      <div id="dataSourcesBody" style="display:none;max-height:280px;overflow-y:auto;padding:0 12px 10px"></div>
+    </div><!-- /data-sources-panel -->
+
   </div><!-- /side-column -->
 
   <!-- Map -->
   <div class="map-wrap">
     <div id="map"></div>
+
+    <!-- Toast notifications — non-blocking, top-right. Used for data-source
+         failure alerts so the user is told immediately something went wrong
+         without interrupting whatever they're doing (drawing, panning,
+         waiting on the busy overlay). Stacks top-to-bottom, auto-dismisses. -->
+    <div id="toastStack" style="position:absolute;top:12px;right:12px;z-index:1600;display:flex;flex-direction:column;gap:8px;width:320px;pointer-events:none"></div>
 
     <!-- Bottom-left stack: legend + add data (flex column, grows upward) -->
     <div style="position:absolute;bottom:12px;left:12px;z-index:900;display:flex;flex-direction:column-reverse;gap:5px;align-items:stretch;width:210px">
@@ -1045,6 +1198,31 @@
       <span class="log-badge" id="logBadge">!</span>
     </div>
 
+    <!-- Busy overlay — blocks map interaction during long-running work
+         (analysis, AOI dissolve) and shows a spinner + live status so
+         clicks/drags don't pile up against an unresponsive map. -->
+    <div class="busy-overlay" id="busyOverlay">
+      <div class="busy-card">
+        <div class="busy-spinner"></div>
+        <div class="busy-timer" id="busyTimer">0:00</div>
+        <div class="busy-text" id="busyText">Working…</div>
+        <div class="busy-subtext" id="busySubtext"></div>
+        <div class="busy-warning" id="busyWarning">⚠ Do not close this tab or click anything until it finishes</div>
+      </div>
+    </div>
+
+    <!-- AOI-build finished confirmation — shown after the busy overlay closes
+         for an AOI dissolve (no modal opens automatically for that flow,
+         unlike report generation, so this gives explicit completion feedback). -->
+    <div class="busy-overlay" id="aoiDoneOverlay">
+      <div class="busy-card">
+        <div class="busy-done-check">✓</div>
+        <div class="busy-text">AOI ready</div>
+        <div class="busy-subtext" id="aoiDoneSubtext"></div>
+        <button class="btn btn-primary" onclick="dismissAOIDone()" style="width:auto;padding:7px 20px;margin-top:6px">OK</button>
+      </div>
+    </div>
+
   </div>
 
 </div><!-- /workspace -->
@@ -1099,12 +1277,18 @@ function polyArea(rings) {
 
 // Reproject GeoJSON feature/geometry to EPSG:9473 and return planar area in m²
 function areaEPSG9473(geojsonFeatureOrGeometry) {
+  // FeatureCollection (e.g. the batched-upload wrapper layer) — sum each feature
+  if (geojsonFeatureOrGeometry.type === 'FeatureCollection') {
+    return geojsonFeatureOrGeometry.features.reduce((sum, f) => sum + areaEPSG9473(f), 0);
+  }
+
   const geom = geojsonFeatureOrGeometry.geometry || geojsonFeatureOrGeometry;
   const toAlbers = coord => proj4('EPSG:4326', 'EPSG:9473', [coord[0], coord[1]]);
 
   function reprojectRing(ring)  { return ring.map(toAlbers); }
   function reprojectPoly(poly)  { return poly.map(reprojectRing); }
 
+  if (!geom) return 0;
   if (geom.type === 'Polygon') {
     return polyArea(reprojectPoly(geom.coordinates));
   } else if (geom.type === 'MultiPolygon') {
@@ -1128,54 +1312,94 @@ const CONFIG = {
       url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/arcgis/rest/services/Australian_Aged_Care_Services/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
       color:      '#2d7592',
       labelField: ['Service_Name','ServiceName','NAME','name'],
-      onDemand:   false
+      onDemand:   false,
+      attribution: {
+        publisher: 'Australian Government Department of Health, Disability and Ageing',
+        description: 'Aged care services subsidised by the Australian Government.',
+        infoUrl: 'https://geospatial-australianhealth.hub.arcgis.com/datasets/australian-aged-care-services'
+      }
     },
     B: {
       name:       'Public Hospitals',
       url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/ArcGIS/rest/services/Declared_Public_Hospitals/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
       color:      '#b94527',
       labelField: ['Hospital_Name','HospitalName','NAME','name'],
-      onDemand:   false
+      onDemand:   false,
+      attribution: {
+        publisher: 'Australian Government Department of Health, Disability and Ageing',
+        description: 'Hospitals declared for health insurance business under the Private Health Insurance Act 2007.',
+        infoUrl: 'https://www.health.gov.au/resources/publications/list-of-declared-hospitals'
+      }
     },
     E: {
       name:       'Private Hospitals',
       url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/ArcGIS/rest/services/Declared_Private_Hospitals/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
       color:      '#d47b22',
       labelField: ['Hospital_Name','HospitalName','NAME','name'],
-      onDemand:   false
+      onDemand:   false,
+      attribution: {
+        publisher: 'Australian Government Department of Health, Disability and Ageing',
+        description: 'Hospitals declared for health insurance business under the Private Health Insurance Act 2007.',
+        infoUrl: 'https://www.health.gov.au/resources/publications/list-of-declared-hospitals'
+      }
     },
     F: {
       name:       'Major Power Stations',
       url:        'https://services.ga.gov.au/gis/rest/services/National_Electricity_Infrastructure/MapServer/1/query?outFields=*&where=1%3D1&f=geojson',
       color:      '#f2af00',
       labelField: ['NAME','name','STATION_NAME','StationName','LABEL'],
-      onDemand:   false
+      onDemand:   false,
+      attribution: {
+        publisher: 'Commonwealth of Australia (Geoscience Australia)',
+        description: 'National Electricity Infrastructure database — major power stations, licensed CC BY.',
+        infoUrl: 'https://pid.geoscience.gov.au/dataset/ga/145094'
+      }
     },
     C: {
       name:       'Population (2025)',
       url:        'https://services-ap1.arcgis.com/EiaPtTiEArHVnvWM/arcgis/rest/services/ABS%20Australian%20population%20Grid%20to%20Point%20-%202025/FeatureServer/0/query',
       color:      '#d47b22',
       popField:   'pop',
-      onDemand:   true
+      onDemand:   true,
+      attribution: {
+        publisher: 'Australian Bureau of Statistics (ABS)',
+        description: '1km x 1km estimated resident population grid, distributed via the Digital Atlas of Australia.',
+        infoUrl: 'https://digital.atlas.gov.au/datasets/digitalatlas::abs-australian-population-grid-2024'
+      }
     },
     D: {
       name:       'Address Points',
       urlBase:    'https://services-ap1.arcgis.com/ypkPEy1AmwPKGNNv/arcgis/rest/services/national_address_points/FeatureServer/0/query',
       color:      '#89ccb5',
       labelField: ['address','ADDRESS','full_address','FULL_ADDRESS','site_name','SITE_NAME'],
-      onDemand:   true
+      onDemand:   true,
+      attribution: {
+        publisher: 'Geoscape Australia (likely — same hosting organisation as Geoscape Roads)',
+        description: 'National address point locations.',
+        infoUrl: 'https://geoscape.com.au/legal/data-copyright-and-disclaimer/'
+      }
     },
     STE: {
       name:      'State / Territory',
       url:       'https://services-ap1.arcgis.com/EiaPtTiEArHVnvWM/arcgis/rest/services/Internal_State_Borders/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
       color:     '#00797A',
-      nameField: ['ste_name_2021','STE_NAME_2021','state_name_2021','STATE_NAME_2021','STE_NAME21','STE_NAME','STATE_NAME','name','NAME']
+      nameField: ['ste_name_2021','STE_NAME_2021','state_name_2021','STATE_NAME_2021','STE_NAME21','STE_NAME','STATE_NAME','name','NAME'],
+      attribution: {
+        publisher: 'Australian Bureau of Statistics (ABS)',
+        description: 'State and territory boundaries, Australian Statistical Geography Standard (ASGS).',
+        infoUrl: 'https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/digital-boundary-files'
+      }
     },
     LGA: {
       name:     'LGA Boundaries',
       url:      'https://geo.abs.gov.au/arcgis/rest/services/ASGS2024/LGA/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
       color:    '#89ccb5',
-      nameField: ['lga_name_2024','LGA_NAME_2024','LGA_NAME24','lga_name_2021','LGA_NAME_2021','LGA_NAME','lga_name','NAME','name']
+      nameField: ['lga_name_2024','LGA_NAME_2024','LGA_NAME24','lga_name_2021','LGA_NAME_2021','LGA_NAME','lga_name','NAME','name'],
+      attribution: {
+        publisher: 'Australian Bureau of Statistics (ABS)',
+        description: 'Local Government Area boundaries, an ABS Mesh Block representation of gazetted LGA boundaries (ASGS 2024).',
+        infoUrl: 'https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/digital-boundary-files'
+      }
     }
   }
 };
@@ -1206,7 +1430,12 @@ const state = {
   sessionHistory:  [],   // array of { id, timestamp, label, reportData, sortCol, sortAsc }
   activeHistoryId: null,
   sortCol:         'lga',
-  sortAsc:         true
+  sortAsc:         true,
+  // Layers that failed to load at startup (LGA/STE/A/B/E/F) — persists until
+  // the layer is successfully reloaded, so a report generated any time after
+  // a startup failure still knows to warn about it. Cleared per-key on
+  // successful (re)load — see loadAllLayers/loadPointLayers/reloadLayers.
+  layerLoadFailures: {}   // key -> error message string
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1572,8 +1801,10 @@ async function loadAllLayers() {
     document.getElementById('countLGA').textContent = lgaData.features.length.toLocaleString();
     log(`LGA Boundaries: ${lgaData.features.length.toLocaleString()} features`, 'ok');
     buildLGAIndex(lgaData);  // build spatial index for fast point-in-polygon
+    delete state.layerLoadFailures.LGA;
   } catch(e) {
-    log(`Error loading LGA: ${e.message}`, 'error');
+    notifyDataSourceFailure('LGA Boundaries', e.message);
+    state.layerLoadFailures.LGA = e.message;
   }
 
   try {
@@ -1583,8 +1814,10 @@ async function loadAllLayers() {
     renderLayer('STE', steData);
     document.getElementById('countSTE').textContent = steData.features.length.toLocaleString();
     log(`State / Territory: ${steData.features.length.toLocaleString()} features`, 'ok');
+    delete state.layerLoadFailures.STE;
   } catch(e) {
-    log(`Error loading STE: ${e.message}`, 'error');
+    notifyDataSourceFailure('State / Territory', e.message);
+    state.layerLoadFailures.STE = e.message;
   }
 
   // Point layers A, B, E, F — deferred until user zooms to regional scale
@@ -1668,8 +1901,10 @@ async function loadPointLayers() {
       state.geoData[key] = data;
       renderLayer(key, data);
       log(`${CONFIG.layers[key].name}: ${data.features.length.toLocaleString()} features`, 'ok');
+      delete state.layerLoadFailures[key];
     } catch(e) {
-      log(`Error loading ${CONFIG.layers[key].name}: ${e.message}`, 'error');
+      notifyDataSourceFailure(CONFIG.layers[key].name, e.message);
+      state.layerLoadFailures[key] = e.message;
     }
   }));
 
@@ -1677,7 +1912,7 @@ async function loadPointLayers() {
   // This is a one-time cost — done here so analysis runs are faster
   if (_lgaIndex) {
     log('Tagging point features with LGA/state attributes…', 'info');
-    const tick = () => new Promise(r => setTimeout(r, 0));
+    const tick = globalTick;
     for (const key of ['A','B','E','F']) {
       const src = state.geoData[key];
       if (!src) continue;
@@ -2018,6 +2253,9 @@ function renderPolyList() {
     const area   = areaKm2(l.toGeoJSON());
     const label  = l._polyLabel  || `Polygon ${i+1}`;
     const source = l._polySource === 'upload' ? '⬆' : '✏';
+    const editBtn = l._batchCount
+      ? `<button class="poly-edit-btn" disabled title="Batched upload — remove and re-upload to change" style="opacity:0.35;cursor:not-allowed">✎</button>`
+      : `<button class="poly-edit-btn" onclick="startEditingPoly(${i})" title="Edit">✎</button>`;
     return `<div class="poly-list-item"
          onmouseenter="highlightPoly(${i}, true)"
          onmouseleave="highlightPoly(${i}, false)">
@@ -2027,7 +2265,7 @@ function renderPolyList() {
         <span class="poly-area">${area.toLocaleString()} sq km</span>
       </div>
       <div class="poly-actions">
-        <button class="poly-edit-btn" onclick="startEditingPoly(${i})" title="Edit">✎</button>
+        ${editBtn}
         <button class="poly-del"      onclick="removePolygon(${i})"    title="Remove">✕</button>
       </div>
     </div>`;
@@ -2044,16 +2282,10 @@ function renderPolyList() {
         <div class="draw-pulse"></div>
         <span id="drawModeLabel">Editing…</span>
       </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="btn btn-primary" onclick="completeEditing()"
-                style="font-size:11px;padding:5px 8px;flex:1">
-          ✓ Complete edit
-        </button>
-        <button class="btn btn-ghost" onclick="cancelEditing()"
-                style="font-size:11px;padding:5px 8px;border-color:var(--danger);color:var(--danger);flex:1">
-          ✕ Cancel edit
-        </button>
-      </div>
+      <button class="btn btn-ghost" onclick="cancelEditing()"
+              style="margin-top:6px;font-size:11px;padding:5px 8px;border-color:var(--danger);color:var(--danger)">
+        ✕ Cancel edit
+      </button>
     </div>`;
 }
 
@@ -2109,45 +2341,108 @@ function removeAllPolygons() {
   clearAOI();
 }
 
-async function unionDrawnLayers() {
+// Dissolve a list of Polygon/MultiPolygon features into one.
+//
+// IMPORTANT: this uses divide-and-conquer (pairwise tree) reduction, not a
+// sequential fold. A sequential fold (union(union(union(a,b),c),d)...) keeps
+// growing one accumulator polygon, so each successive turf.union call gets
+// more expensive — total cost grows worse than linearly with feature count
+// and a few thousand features can take many minutes or hang the tab.
+// Tree reduction unions roughly-equal-sized pairs at each level, so every
+// individual union call stays cheap regardless of how many features there are.
+async function dissolveAll(features, tick, label, onRoundProgress) {
+  if (!features.length) return null;
+  if (features.length === 1) return features[0];
+
+  let level = features;
+  let round = 0;
+  const startCount = level.length;
+  while (level.length > 1) {
+    round++;
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) {
+      if (i + 1 < level.length) {
+        next.push(turf.union(level[i], level[i + 1]));
+      } else {
+        next.push(level[i]); // odd one out carries forward untouched
+      }
+      if (i % 16 === 0) await tick();
+    }
+    if (label) log(`${label}: round ${round}, ${level.length.toLocaleString()} → ${next.length.toLocaleString()}…`, 'info');
+    if (onRoundProgress) {
+      // Each round halves the remaining count — use log2 progress so the bar
+      // moves smoothly rather than jumping most of the way on round 1.
+      const totalRounds = Math.ceil(Math.log2(startCount));
+      onRoundProgress(Math.min(round / Math.max(totalRounds, 1), 0.98), `Dissolving polygons: round ${round}, ${next.length.toLocaleString()} shape(s) left…`);
+    }
+    level = next;
+    await tick();
+  }
+  return level[0];
+}
+
+// Flatten a drawnItems layer's GeoJSON into a flat array of single-geometry
+// Polygon/MultiPolygon Feature objects. Most layers are already a single
+// Feature, but batched uploads (see addPolygonsToRegistry) store a whole
+// FeatureCollection behind one drawnItems entry — turf.union needs individual
+// features, not a collection, so this unwraps that case.
+function flattenLayerGeoJSON(gj) {
+  if (gj.type === 'FeatureCollection') return gj.features;
+  if (gj.type === 'Feature') return [gj];
+  return [{ type: 'Feature', geometry: gj, properties: {} }];
+}
+
+// Above this many input features, a full-resolution re-dissolve pass is
+// skipped even if total vertices are under the AOI_VERTEX threshold — with
+// enough features, even small per-feature vertex counts add up to a slow
+// tree union, and the pre-simplified result is already accurate to a few
+// hundred metres at most simplification tolerances used here.
+const FULL_RES_REDISSOLVE_FEATURE_LIMIT = 500;
+
+async function unionDrawnLayers(onProgress) {
   const layers = state.drawnItems.getLayers();
   if (!layers.length) return null;
-  if (layers.length === 1) return layers[0].toGeoJSON();
-  try {
-    const tick = () => new Promise(r => setTimeout(r, 0));
-    const features = layers.map(l => l.toGeoJSON());
 
-    // For the union dissolve step only, pre-simplify each input if very complex
-    // This avoids the union itself hanging — the individual polygons on the map stay at full resolution
-    const forUnion = features.map(f => {
+  const tick = globalTick;
+
+  // Expand every drawnItems entry to its individual polygon features —
+  // handles both normal single-feature layers and batched multi-feature ones.
+  let features = [];
+  for (const l of layers) {
+    features = features.concat(flattenLayerGeoJSON(l.toGeoJSON()));
+  }
+  features = features.filter(f => f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon');
+  if (!features.length) return null;
+  if (features.length === 1) return features[0];
+
+  try {
+    const totalVerts = features.reduce((s, f) => s + countVertices(f), 0);
+    log(`Dissolving ${features.length.toLocaleString()} polygon feature(s), ${totalVerts.toLocaleString()} total vertices…`, 'info');
+
+    // For the union dissolve step, pre-simplify any individually complex
+    // input — this is what keeps each turf.union call in the tree cheap.
+    const forUnion = [];
+    for (let i = 0; i < features.length; i++) {
+      let f = features[i];
       const v = countVertices(f);
       if (v > 2000) {
-        try { return simplifyToTarget(f, 1500); } catch {}
+        try { f = simplifyToTarget(f, 1500); } catch {}
       }
-      return f;
-    });
-
-    let dissolved = forUnion[0];
-    for (let i = 1; i < forUnion.length; i++) {
-      await tick();
-      dissolved = turf.union(dissolved, forUnion[i]);
-      log(`Dissolving polygon ${i+1} of ${forUnion.length}…`, 'info');
+      forUnion.push(f);
+      if (i % 100 === 0) await tick();
     }
 
-    // Re-dissolve using the full-resolution geometries for the final stored AOI
-    // Only do this if the union succeeded and there aren't too many total vertices
-    const totalVerts = features.reduce((s, f) => s + countVertices(f), 0);
-    if (totalVerts <= 10000) {
-      let fullDissolved = features[0];
-      for (let i = 1; i < features.length; i++) {
-        await tick();
-        fullDissolved = turf.union(fullDissolved, features[i]);
-      }
-      return fullDissolved;
+    const dissolved = await dissolveAll(forUnion, tick, 'Dissolving (simplified pass)', onProgress);
+
+    // Re-dissolve at full resolution for the final stored AOI, but only if
+    // the feature count and vertex total are both small enough that a
+    // second tree union won't itself take a long time.
+    if (totalVerts <= 10000 && features.length <= FULL_RES_REDISSOLVE_FEATURE_LIMIT) {
+      const fullDissolved = await dissolveAll(features, tick, 'Dissolving (full resolution)', onProgress);
+      return fullDissolved || dissolved;
     }
 
-    // Too many vertices for a full-resolution union — use the pre-simplified result
-    log(`⚠ AOI has ${totalVerts.toLocaleString()} total vertices — using pre-simplified union to prevent browser freeze`, 'warn');
+    log(`⚠ AOI has ${features.length.toLocaleString()} features / ${totalVerts.toLocaleString()} vertices — using pre-simplified union to keep things fast`, 'warn');
     return dissolved;
 
   } catch(e) {
@@ -2175,57 +2470,23 @@ async function onDrawCreated(e) {
 function startEditingPoly(idx) {
   const layers = state.drawnItems.getLayers();
   if (!layers[idx]) return;
-  state._editingIdx   = idx;
-  state._editingLayer = layers[idx];
-
-  // Edit directly on drawnItems — no temp group needed
-  // Hide all other layers during edit to avoid confusion
-  state.drawnItems.eachLayer((l, i) => {
-    if (l !== layers[idx]) l.setStyle({ opacity: 0.2, fillOpacity: 0.05 });
-  });
-
+  if (layers[idx]._batchCount) {
+    log(`"${layers[idx]._polyLabel}" was added as a batch of ${layers[idx]._batchCount.toLocaleString()} features and can't be edited as one shape — remove and re-upload instead`, 'warn');
+    return;
+  }
+  state._editingIdx = idx;
+  const tempGroup = new L.FeatureGroup([layers[idx]]).addTo(state.map);
+  state._editTempGroup = tempGroup;
   state.editHandler = new L.EditToolbar.Edit(state.map, {
-    featureGroup: state.drawnItems,
+    featureGroup: tempGroup,
     selectedPathOptions: { color: '#2d7592', dashArray: '4 4', fillOpacity: 0.2 }
   });
   state.editHandler.enable();
   state.isEditing = true;
   showDrawMode(`Editing ${layers[idx]._polyLabel || 'polygon'}…`);
+  // Show cancel edit in the manage section
   const row = document.getElementById('editModeRow');
   if (row) row.style.display = 'block';
-}
-
-function completeEditing() {
-  if (state.editHandler) {
-    state.editHandler.save();
-    state.editHandler.disable();
-    state.editHandler = null;
-  }
-  // Restore all polygon styles
-  state.drawnItems.eachLayer(l => {
-    if (l.setStyle) l.setStyle({ color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' });
-  });
-  if (state._editTempGroup) {
-    state.map.removeLayer(state._editTempGroup);
-    state._editTempGroup = null;
-  }
-  state.isEditing     = false;
-  state._editingIdx   = null;
-  state._editingLayer = null;
-  hideDrawMode();
-  const row = document.getElementById('editModeRow');
-  if (row) row.style.display = 'none';
-
-  // Small delay to let Leaflet.draw commit the edited coordinates before reading them
-  setTimeout(() => {
-    unionDrawnLayers().then(unioned => {
-      if (unioned) {
-        log(`Edit complete — new AOI verts: ${countVertices(unioned)}`, 'ok');
-        setAOI(unioned, 'draw');
-      }
-      renderPolyList();
-    });
-  }, 50);
 }
 
 function cancelEditing() {
@@ -2238,13 +2499,8 @@ function cancelEditing() {
     state.map.removeLayer(state._editTempGroup);
     state._editTempGroup = null;
   }
-  // Restore all polygon styles
-  state.drawnItems.eachLayer(l => {
-    if (l.setStyle) l.setStyle({ color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' });
-  });
-  state.isEditing     = false;
-  state._editingIdx   = null;
-  state._editingLayer = null;
+  state.isEditing    = false;
+  state._editingIdx  = null;
   hideDrawMode();
   const row = document.getElementById('editModeRow');
   if (row) row.style.display = 'none';
@@ -2277,27 +2533,172 @@ function onDropPop(e)   { e.preventDefault(); onDragLeave('popUploadZone'); if (
 function handleFileSelect(e) { if (e.target.files[0]) processAOIFile(e.target.files[0]); }
 function handlePopFileSelect(e) { if (e.target.files[0]) loadPopulationRaster(e.target.files[0]); }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+}
+
+function showUploadProgress(pct, text) {
+  const bar = document.getElementById('uploadProgress');
+  const fill = document.getElementById('uploadProgressFill');
+  const lbl  = document.getElementById('uploadProgressLabel');
+  if (!bar) return;
+  bar.style.display = lbl.style.display = 'block';
+  fill.style.width = pct + '%';
+  lbl.textContent = text;
+}
+function hideUploadProgress() {
+  const bar = document.getElementById('uploadProgress');
+  const fill = document.getElementById('uploadProgressFill');
+  const lbl  = document.getElementById('uploadProgressLabel');
+  if (!bar) return;
+  bar.style.display = lbl.style.display = 'none';
+  fill.style.width = '0%';
+}
+
+// Read a File as text while reporting progress and yielding to the browser,
+// so a large (tens-of-MB) GeoJSON/KML doesn't freeze the tab silently.
+function readFileAsTextWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+    };
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('File read failed'));
+    reader.readAsText(file);
+  });
+}
+function readFileAsArrayBufferWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+    };
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('File read failed'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// Parse a large JSON string off the synchronous main-thread stack by
+// yielding a frame first, so the "Parsing…" status actually paints
+// before the (still blocking) JSON.parse call runs.
+async function parseJSONWithYield(text) {
+  await new Promise(r => setTimeout(r, 0));
+  return JSON.parse(text);
+}
+
+const AOI_FILE_SIZE_WARN = 20 * 1024 * 1024; // 20 MB — triggers a confirm dialog before proceeding
+
 async function processAOIFile(file) {
-  log(`Loading: ${file.name}`, 'info');
+  const sizeLabel = formatBytes(file.size);
+  log(`Loading: ${file.name} (${sizeLabel})`, 'info');
+
+  if (file.size > AOI_FILE_SIZE_WARN) {
+    log(`Large file (${sizeLabel}) — confirming with user before processing`, 'warn');
+    const proceed = confirm(
+      `This file is ${sizeLabel}.\n\n` +
+      `Large, complex files can take 5–20 minutes to process and will lock ` +
+      `the map while working.\n\n` +
+      `Do not close this tab or navigate away once processing starts.\n\n` +
+      `Click OK to continue, or Cancel to choose a different file.`
+    );
+    if (!proceed) {
+      log('Upload cancelled by user (large file warning)', 'info');
+      document.getElementById('fileInput').value = '';
+      return;
+    }
+    log('User confirmed — proceeding with large file', 'info');
+  }
+
   setStatus('loading');
+  showUploadProgress(0, `Reading ${file.name}…`);
+  let buildStartedAt = null;
+  let buildSucceeded = false;
   try {
     const ext = file.name.split('.').pop().toLowerCase();
     let geojson;
-    if      (ext === 'zip')                    { geojson = await shp(await file.arrayBuffer()); log('Parsed Shapefile (.zip)', 'ok'); }
-    else if (ext === 'kml' || ext === 'kmz')   { geojson = toGeoJSON.kml(new DOMParser().parseFromString(await file.text(), 'text/xml')); log('Parsed KML', 'ok'); }
-    else if (ext === 'geojson' || ext === 'json') { geojson = JSON.parse(await file.text()); log('Parsed GeoJSON', 'ok'); }
-    else throw new Error(`Unsupported format: .${ext}`);
+
+    if (ext === 'zip') {
+      const buf = await readFileAsArrayBufferWithProgress(file, (loaded, total) =>
+        showUploadProgress(Math.round((loaded/total)*40), `Reading ${formatBytes(loaded)} / ${formatBytes(total)}…`)
+      );
+      showUploadProgress(45, 'Parsing shapefile…');
+      await new Promise(r => setTimeout(r, 0)); // let progress paint before shp() blocks
+      geojson = await shp(buf);
+      log('Parsed Shapefile (.zip)', 'ok');
+
+    } else if (ext === 'kml' || ext === 'kmz') {
+      const text = await readFileAsTextWithProgress(file, (loaded, total) =>
+        showUploadProgress(Math.round((loaded/total)*40), `Reading ${formatBytes(loaded)} / ${formatBytes(total)}…`)
+      );
+      showUploadProgress(45, 'Parsing KML…');
+      await new Promise(r => setTimeout(r, 0));
+      geojson = toGeoJSON.kml(new DOMParser().parseFromString(text, 'text/xml'));
+      log('Parsed KML', 'ok');
+
+    } else if (ext === 'geojson' || ext === 'json') {
+      const text = await readFileAsTextWithProgress(file, (loaded, total) =>
+        showUploadProgress(Math.round((loaded/total)*40), `Reading ${formatBytes(loaded)} / ${formatBytes(total)}…`)
+      );
+      showUploadProgress(45, 'Parsing GeoJSON…');
+      geojson = await parseJSONWithYield(text);
+      log('Parsed GeoJSON', 'ok');
+
+    } else {
+      throw new Error(`Unsupported format: .${ext}`);
+    }
+
+    showUploadProgress(55, 'Building AOI…');
+    showBusy('Building AOI…', 'Combining and dissolving polygons — the map is locked until this finishes.');
+    buildStartedAt = _busyStartedAt; // capture before hideBusy() clears it below
     const baseName = file.name.replace(/\.[^.]+$/, '');
-    addPolygonsToRegistry(geojson, baseName);
+    await addPolygonsToRegistry(geojson, baseName, (pct, text) => {
+      showUploadProgress(55 + Math.round(pct*0.45), text);
+      updateBusy(null, text);
+    });
     document.getElementById('fileInput').value = '';
     setStatus('ready');
+    buildSucceeded = true;
   } catch(e) {
     log(`Upload error: ${e.message}`, 'error');
     setStatus('error');
+  } finally {
+    setTimeout(hideUploadProgress, 400);
+    hideBusy(true);
+    // Only show the "AOI ready" confirmation when the build actually ran
+    // (buildStartedAt set) and succeeded — not for small/instant files
+    // (nothing to confirm) or failed uploads (the error log already covers it).
+    if (buildSucceeded && buildStartedAt) {
+      const elapsedMs = Date.now() - buildStartedAt;
+      showAOIDone(elapsedMs);
+    }
   }
 }
 
-async function addPolygonsToRegistry(geojson, sourceLabel) {
+// Above this many uploaded features, skip per-feature Leaflet layers + permanent
+// tooltips (each one is real DOM/CPU cost) and instead add one batched, non-edit
+// reference layer plus a single dissolved AOI entry in the polygon list.
+const AOI_BATCH_THRESHOLD = 300;
+// Any single feature above this many vertices gets simplified before it's added
+// to the map at all — a hand-edited city-block shapefile is fine at full res,
+// a national land-cover layer with 200k-vertex polygons is not.
+const AOI_PER_FEATURE_SIMPLIFY_THRESHOLD = 20000;
+
+async function addPolygonsToRegistry(geojson, sourceLabel, onProgress) {
+  // shpjs returns an array of FeatureCollections for a multi-layer .zip
+  // (one entry per .shp inside). Flatten that into a single feature set
+  // rather than failing on geojson.type being undefined for an array.
+  if (Array.isArray(geojson)) {
+    log(`Shapefile zip contains ${geojson.length} layer(s) — combining all into one AOI`, 'info');
+    geojson = {
+      type: 'FeatureCollection',
+      features: geojson.flatMap(fc => fc?.features || [])
+    };
+  }
+
   let features = [];
   if (geojson.type === 'FeatureCollection') features = geojson.features;
   else if (geojson.type === 'Feature')       features = [geojson];
@@ -2308,31 +2709,105 @@ async function addPolygonsToRegistry(geojson, sourceLabel) {
   );
   if (!features.length) throw new Error('No polygon features found');
 
-  features.forEach((f) => {
+  const tick = globalTick;
+  const totalVerts = features.reduce((s, f) => s + countVertices(f), 0);
+  log(`${features.length.toLocaleString()} polygon feature(s), ${totalVerts.toLocaleString()} total vertices`, 'info');
+
+  const batchMode = features.length > AOI_BATCH_THRESHOLD;
+  if (batchMode) {
+    log(`${features.length.toLocaleString()} features — using batched rendering (single layer, no per-feature labels) for performance`, 'info');
+  }
+
+  // Above this many features, dissolving can realistically take several
+  // minutes even with the tree-union approach — let the busy overlay say so
+  // rather than just sitting on "Combining and dissolving polygons…" with
+  // no sense of how long that might be.
+  const LARGE_DISSOLVE_FEATURE_HINT = 2000;
+  if (features.length > LARGE_DISSOLVE_FEATURE_HINT) {
+    updateBusy(null, `${features.length.toLocaleString()} features to dissolve — this can take several minutes. Do not close the tab.`);
+    log(`${features.length.toLocaleString()} features is a large dissolve — this may take several minutes`, 'warn');
+  }
+
+  if (batchMode) {
+    // ── Batched path: one Leaflet layer for the whole set, no per-feature
+    // tooltips/popups. Still simplifies any individual monster polygons so
+    // the union step downstream isn't handed absurd geometries.
     state.polyCounter++;
-    const label = features.length === 1
-      ? (sourceLabel || `Polygon ${state.polyCounter}`)
-      : `${sourceLabel || 'Polygon'} ${state.polyCounter}`;
+    const label = sourceLabel || `Polygon ${state.polyCounter}`;
 
-    // Create a Leaflet layer from the single feature
-    const gj = L.geoJSON(f, {
-      style: { color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' }
+    const preparedFeatures = [];
+    for (let i = 0; i < features.length; i++) {
+      let f = features[i];
+      const v = countVertices(f);
+      if (v > AOI_PER_FEATURE_SIMPLIFY_THRESHOLD) {
+        try { f = simplifyToTarget(f, AOI_PER_FEATURE_SIMPLIFY_THRESHOLD); } catch {}
+      }
+      preparedFeatures.push(f);
+      if (i % 250 === 0) {
+        if (onProgress) onProgress(i / features.length, `Preparing features: ${i.toLocaleString()} / ${features.length.toLocaleString()}…`);
+        await tick();
+      }
+    }
+
+    const fc = { type: 'FeatureCollection', features: preparedFeatures };
+    const batchLayer = L.geoJSON(fc, {
+      style: { color: '#f2af00', weight: 1.5, fillColor: '#f2af00', fillOpacity: 0.12, dashArray: '6 4' },
+      interactive: false  // skip per-ring hit-testing & event wiring for thousands of shapes
     });
-    let innerLayer = null;
-    gj.eachLayer(l => { innerLayer = l; });
-    if (!innerLayer) return;
 
-    innerLayer._polyLabel  = label;
-    innerLayer._polySource = 'upload';
-    state.drawnItems.addLayer(innerLayer);
-    addPolyLabel(innerLayer);
-    log(`Added: ${label}`, 'ok');
+    // Register as a single FeatureGroup-compatible entry so removePolygon /
+    // renderPolyList / unionDrawnLayers all keep working unmodified — wrap the
+    // multi-feature batch as one logical "layer" using a FeatureGroup so it
+    // behaves like a single item in state.drawnItems.
+    const wrapper = L.featureGroup(batchLayer.getLayers());
+    wrapper._polyLabel    = `${label} (${features.length.toLocaleString()} features, batched)`;
+    wrapper._polySource   = 'upload';
+    wrapper._batchCount   = features.length;
+    wrapper.toGeoJSON = () => fc; // union/area code calls toGeoJSON() on each drawnItems layer
+    wrapper.setStyle = (style) => { batchLayer.eachLayer(l => l.setStyle && l.setStyle(style)); };
+    wrapper.bringToFront = () => { batchLayer.eachLayer(l => l.bringToFront && l.bringToFront()); };
+
+    state.drawnItems.addLayer(wrapper);
+    log(`Added: ${wrapper._polyLabel}`, 'ok');
+
+  } else {
+    // ── Small-count path: original behaviour — individual editable layers
+    // with permanent centroid labels, fine up to a few hundred features.
+    for (let i = 0; i < features.length; i++) {
+      const f = features[i];
+      state.polyCounter++;
+      const label = features.length === 1
+        ? (sourceLabel || `Polygon ${state.polyCounter}`)
+        : `${sourceLabel || 'Polygon'} ${state.polyCounter}`;
+
+      const gj = L.geoJSON(f, {
+        style: { color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' }
+      });
+      let innerLayer = null;
+      gj.eachLayer(l => { innerLayer = l; });
+      if (!innerLayer) continue;
+
+      innerLayer._polyLabel  = label;
+      innerLayer._polySource = 'upload';
+      state.drawnItems.addLayer(innerLayer);
+      addPolyLabel(innerLayer);
+      log(`Added: ${label}`, 'ok');
+
+      if (i % 25 === 0) {
+        if (onProgress) onProgress(i / features.length, `Adding features: ${i.toLocaleString()} / ${features.length.toLocaleString()}…`);
+        await tick();
+      }
+    }
+  }
+
+  if (onProgress) onProgress(0.9, 'Dissolving into AOI…');
+  const unioned = await unionDrawnLayers((pct, text) => {
+    if (onProgress) onProgress(0.9 + pct * 0.1, text);
   });
-
-  const unioned = await unionDrawnLayers();
   if (unioned) setAOI(unioned, 'draw');
   renderPolyList();
   try { state.map.fitBounds(state.drawnItems.getBounds(), { padding: [40, 40] }); } catch {}
+  if (onProgress) onProgress(1, 'Done');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2559,13 +3034,14 @@ async function runAnalysis() {
 
   log(`Starting analysis — ${tier.label} AOI (${verts.toLocaleString()} vertices)${useTiling ? ' · tiled PIP enabled' : ''}`, 'info');
   setStatus('loading');
+  showBusy('Generating report…', 'The map is locked while this runs — it will unlock automatically.');
 
   const prog = document.getElementById('analysisProgress');
   const fill = document.getElementById('analysisProgressFill');
   const lbl  = document.getElementById('analysisProgressLabel');
   prog.style.display = lbl.style.display = 'block';
 
-  const tick = () => new Promise(r => setTimeout(r, 0));
+  const tick = globalTick;
 
   // AOI for intersect area calcs — simplify only if very large
   const intersectAOI = getAOIForIntersect(analysisAOI);
@@ -2626,6 +3102,10 @@ async function runAnalysis() {
 
   try {
     const results = {};
+    // Layers that failed during THIS analysis run (population/address fetch
+    // errors). Startup-time failures (LGA/STE/A/B/E/F) are tracked separately
+    // in state.layerLoadFailures and merged in below when the report is built.
+    const runFailures = [];
 
     // ── Layers A, B, E, F: pre-loaded, count points ──────────
     for (let i = 0; i < 4; i++) {
@@ -2717,7 +3197,9 @@ async function runAnalysis() {
       log(`Population: ${popPoints.length.toLocaleString()} points in bbox, running exact intersection…`, 'info');
 
       let cellsInside = 0, totalPop = 0;
-      for (const f of popPoints) {
+      const insidePopPoints = []; // collected in the same pass — avoids a second full scan below
+      for (let pi = 0; pi < popPoints.length; pi++) {
+        const f = popPoints[pi];
         if (!f.geometry || f.geometry.type !== 'Point') continue;
         try {
           if (pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1])) {
@@ -2727,8 +3209,14 @@ async function runAnalysis() {
             results[lgaName].C += popVal;
             totalPop += popVal;
             cellsInside++;
+            insidePopPoints.push(f);
           }
         } catch {}
+        if (pi % 500 === 0) {
+          setProgress(fill, lbl, 84 + Math.round((pi / popPoints.length) * 6),
+            `Population: testing point ${pi.toLocaleString()} / ${popPoints.length.toLocaleString()}…`);
+          await tick();
+        }
       }
 
       // Ceiling round all population values
@@ -2736,17 +3224,16 @@ async function runAnalysis() {
         results[lga].C = Math.ceil(results[lga].C);
       }
 
-      state.geoData.C = { type: 'FeatureCollection', features: popPoints.filter(f => {
-        try { return f.geometry && pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1]); } catch { return false; }
-      })};
+      state.geoData.C = { type: 'FeatureCollection', features: insidePopPoints };
       document.getElementById('countC').textContent = `${Math.ceil(totalPop).toLocaleString()} pop`;
       log(`Population: ${cellsInside.toLocaleString()} points inside AOI · total ${Math.ceil(totalPop).toLocaleString()}`, 'ok');
 
     } catch(e) {
-      log(`Population fetch failed: ${e.message}`, 'error');
+      notifyDataSourceFailure(CONFIG.layers.C.name, e.message);
+      runFailures.push({ key: 'C', name: CONFIG.layers.C.name, reason: e.message });
     }
 
-    // ── Layer D: Address Points — spatial filter fetch + exact PIP ──
+    // ── Layer D: Address Points — bbox fetch + exact intersection, count ──
     setProgress(fill, lbl, 92, 'Fetching Address Points within AOI…');
     await tick();
 
@@ -2771,6 +3258,7 @@ async function runAnalysis() {
 
         const page = data.features || [];
         addrPoints = addrPoints.concat(page);
+        // Continue if: service explicitly says exceeded, OR we got a full page (may be more)
         exceeded = data.exceededTransferLimit === true || page.length === pageSize;
         offset += page.length;
         if (page.length === 0) break;
@@ -2779,12 +3267,14 @@ async function runAnalysis() {
         await tick();
       }
 
-      log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact PIP…`, 'info');
+      log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact intersection…`, 'info');
 
       // Exact intersection + count per LGA
       const cfg = CONFIG.layers.D;
       let addrInside = 0;
-      for (const f of addrPoints) {
+      const insideAddrPoints = []; // collected in the same pass — avoids a second full scan below
+      for (let ai = 0; ai < addrPoints.length; ai++) {
+        const f = addrPoints[ai];
         if (!f.geometry || f.geometry.type !== 'Point') continue;
         try {
           if (pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1])) {
@@ -2792,18 +3282,23 @@ async function runAnalysis() {
             if (!results[lgaName]) results[lgaName] = { A: 0, B: 0, E: 0, F: 0, C: 0, D: 0, state: stateName, stateCode, lgaCode };
             results[lgaName].D++;
             addrInside++;
+            insideAddrPoints.push(f);
           }
         } catch {}
+        if (ai % 500 === 0) {
+          setProgress(fill, lbl, 92 + Math.round((ai / addrPoints.length) * 4),
+            `Address Points: testing point ${ai.toLocaleString()} / ${addrPoints.length.toLocaleString()}…`);
+          await tick();
+        }
       }
 
-      state.geoData.D = { type: 'FeatureCollection', features: addrPoints.filter(f => {
-        try { return pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1]); } catch { return false; }
-      })};
+      state.geoData.D = { type: 'FeatureCollection', features: insideAddrPoints };
       document.getElementById('countD').textContent = addrInside.toLocaleString();
       log(`Address Points: ${addrInside.toLocaleString()} inside AOI`, 'ok');
 
     } catch(e) {
-      log(`Address Points fetch failed: ${e.message}`, 'error');
+      notifyDataSourceFailure(CONFIG.layers.D.name, e.message);
+      runFailures.push({ key: 'D', name: CONFIG.layers.D.name, reason: e.message });
     }
     await tick();
 
@@ -2811,42 +3306,30 @@ async function runAnalysis() {
     setProgress(fill, lbl, 96, 'Calculating LGA intersection areas…');
     await tick();
 
+    // Pre-build a name→feature lookup once instead of calling
+    // Array.find() (an O(n) scan through ~550+ LGAs) inside the loop below
+    // for every single result LGA — that was an avoidable O(n²) cost.
+    const lgaByName = new Map();
+    if (state.geoData.LGA) {
+      for (const f of state.geoData.LGA.features) lgaByName.set(getLGAName(f), f);
+    }
+
     const lgaNames = Object.keys(results);
     for (let i = 0; i < lgaNames.length; i++) {
       const lgaName = lgaNames[i];
       try {
-        const lgaFeature = state.geoData.LGA?.features.find(f => getLGAName(f) === lgaName);
+        const lgaFeature = lgaByName.get(lgaName);
         if (!lgaFeature) { results[lgaName].lgaArea = 0; continue; }
         const intersection = turf.intersect(intersectAOI, lgaFeature);
         results[lgaName].lgaArea = intersection ? areaKm2(intersection) : 0;
       } catch {
         results[lgaName].lgaArea = 0;
       }
-      // Yield every 3 LGAs to keep browser responsive
-      if (i % 3 === 0) {
-        setProgress(fill, lbl, 96 + Math.round((i / lgaNames.length) * 3), `Intersection areas: ${i+1} / ${lgaNames.length}…`);
-        await tick();
-      }
-    }
-
-    // ── Calculate area outside any LGA boundary ───────────────
-    const totalLGAArea = Object.entries(results)
-      .filter(([k]) => k !== 'Outside LGA')
-      .reduce((s,[,c]) => s + (c.lgaArea||0), 0);
-    const totalAOIArea = areaKm2(analysisAOI);
-    const outsideArea  = Math.max(0, totalAOIArea - totalLGAArea);
-
-    // Merge with any "Outside LGA" entries from findLGA fallback
-    const outsideKey = 'Outside LGA';
-    if (!results[outsideKey]) results[outsideKey] = { A:0, B:0, E:0, F:0, C:0, D:0, state:'', stateCode:'99', lgaCode:'99999', lgaArea:0 };
-    results[outsideKey].lgaArea = (results[outsideKey].lgaArea || 0) + outsideArea;
-    if (results[outsideKey].lgaArea === 0 && results[outsideKey].A === 0 &&
-        results[outsideKey].B === 0 && results[outsideKey].E === 0 &&
-        results[outsideKey].F === 0 && results[outsideKey].C === 0 &&
-        results[outsideKey].D === 0) {
-      delete results[outsideKey]; // remove if truly empty
-    } else {
-      log(`Outside LGA: ${results[outsideKey].lgaArea.toLocaleString()} sq km`, 'info');
+      // turf.intersect on a complex LGA boundary can itself take a noticeable
+      // amount of time, so yield after every LGA rather than every 3rd —
+      // keeps the map responsive even when an AOI spans many large LGAs.
+      setProgress(fill, lbl, 96 + Math.round((i / lgaNames.length) * 3), `Intersection areas: ${i+1} / ${lgaNames.length}…`);
+      await tick();
     }
 
     state.reportData = Object.entries(results).map(([lga, c]) => ({
@@ -2864,6 +3347,19 @@ async function runAnalysis() {
       countD:        c.D||0
     }));
 
+    // Merge startup-time load failures (LGA/STE/A/B/E/F — these can have
+    // failed minutes or hours before this analysis ran, e.g. on page load
+    // or when zooming in) with failures from this specific run (C/D, fetched
+    // fresh per-analysis). This is the one list the report banner and CSV
+    // export both read from — see showReport() and exportCSV().
+    const startupFailures = Object.entries(state.layerLoadFailures).map(([key, reason]) => ({
+      key, name: CONFIG.layers[key]?.name || key, reason
+    }));
+    state.reportLayerFailures = [...startupFailures, ...runFailures];
+    if (state.reportLayerFailures.length) {
+      log(`⚠ Report generated with ${state.reportLayerFailures.length} data layer(s) unavailable: ${state.reportLayerFailures.map(f => f.name).join(', ')}`, 'warn');
+    }
+
     setProgress(fill, lbl, 100, 'Done');
     log(`Report ready — ${state.reportData.length} LGAs`, 'ok');
     setStatus('ready');
@@ -2872,12 +3368,14 @@ async function runAnalysis() {
       prog.style.display = lbl.style.display = 'none';
       fill.style.width = '0%';
       showReport();
+      hideBusy(true); // report modal is its own overlay, map no longer needs locking
     }, 500);
 
   } catch(e) {
     log(`Analysis error: ${e.message}`, 'error');
     setStatus('error');
     prog.style.display = lbl.style.display = 'none';
+    hideBusy(true);
   }
 }
 
@@ -2930,7 +3428,11 @@ function findLGA(point) {
   return { lga: 'Outside LGA', state: '', stateCode: '99', lgaCode: '99999' };
 }
 
-function setProgress(fill, lbl, pct, text) { fill.style.width = pct+'%'; lbl.textContent = text; }
+function setProgress(fill, lbl, pct, text) {
+  fill.style.width = pct+'%';
+  lbl.textContent = text;
+  updateBusy(null, text); // keep the busy overlay's status text in sync
+}
 
 // ═══════════════════════════════════════════════════════════
 // REPORT
@@ -2945,6 +3447,11 @@ function showReport(historyEntry) {
     const lgaCount      = state.reportData.length;
     const id            = ts.getTime();
     const aoiArea       = state.aoi ? areaKm2(state.aoi) : 0;
+    // Capture how long generation took, while the busy-overlay timer is
+    // still live (this runs before hideBusy resets it) — stored on the
+    // history entry so it's still shown correctly if the user revisits
+    // this report later from Session History.
+    const generationMs = _busyStartedAt ? (Date.now() - _busyStartedAt) : null;
     historyEntry = {
       id,
       timestamp:  ts,
@@ -2952,7 +3459,14 @@ function showReport(historyEntry) {
       summary:    `${totalFeatures.toLocaleString()} features · pop ${Math.ceil(totalPop).toLocaleString()}`,
       reportData: JSON.parse(JSON.stringify(state.reportData)),
       aoi:        state.aoi ? JSON.parse(JSON.stringify(state.aoi)) : null,
-      aoiArea
+      aoiArea,
+      generationMs,
+      // Snapshot which data layers were unavailable when this specific
+      // report was generated — see runAnalysis(). Stored per-entry (not
+      // read live from state) so reopening an old report from history still
+      // shows the warning that applied at the time, even if the layer has
+      // since recovered.
+      layerFailures: (state.reportLayerFailures || []).map(f => ({ ...f }))
     };
     state.sessionHistory.unshift(historyEntry);  // newest first
     renderHistoryList();
@@ -2973,37 +3487,16 @@ function showReport(historyEntry) {
   const totalD = data.reduce((s,r) => s+r.countD, 0);
   const max = Math.max(...data.map(r => Math.max(r.countA, r.countHospital, r.countF, r.countC, r.countD)));
 
-  // Separate Outside LGA record — must be declared before outsideRow uses it
-  const outsideRecord = data.find(r => r.lga === 'Outside LGA');
-  const validData     = data.filter(r => r.lga !== 'Outside LGA');
-
-  const numCell = (val) =>
-    `<td class="num">${val != null ? val.toLocaleString() : '—'}</td>`;
-
-  // Outside LGA row
-  const outsideRow = outsideRecord ? `<tr style="border-top:2px solid #ccd0d5;background:#f8f8f8;font-style:italic">
-      <td style="color:#888;font-family:Arial,monospace;font-size:10px;text-transform:uppercase">Outside</td>
-      <td style="color:#888;font-size:11px">Outside</td>
-      <td class="lga-name" style="color:#888">Outside</td>
-      ${numCell(outsideRecord.lgaArea != null ? Math.round(outsideRecord.lgaArea) : null)}
-      ${numCell(outsideRecord.countA)}
-      ${numCell(outsideRecord.countHospital)}
-      ${numCell(outsideRecord.countB)}
-      ${numCell(outsideRecord.countE)}
-      ${numCell(outsideRecord.countF)}
-      ${numCell(outsideRecord.countC)}
-      ${numCell(outsideRecord.countD)}
-    </tr>` : '';
-
   document.getElementById('reportTimestamp').textContent =
-    historyEntry.timestamp.toLocaleString('en-AU', { dateStyle:'medium', timeStyle:'short' });
+    historyEntry.timestamp.toLocaleString('en-AU', { dateStyle:'medium', timeStyle:'short' })
+    + (historyEntry.generationMs != null ? ` · generated in ${formatElapsed(historyEntry.generationMs)}` : '');
 
   // Build structured rows matching CSV output: Total → States → LGAs grouped by state
   const totalArea = Math.round(parseFloat(historyEntry.aoiArea || 0));
 
-  // Group valid data by state
+  // Group by state
   const byState = {};
-  for (const r of validData) {
+  for (const r of data) {
     const s = r.stateName || 'Unknown';
     if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
     byState[s].lgas.push(r);
@@ -3023,6 +3516,9 @@ function showReport(historyEntry) {
     countC:        grp.lgas.reduce((s,r) => s+r.countC, 0),
     countD:        grp.lgas.reduce((s,r) => s+r.countD, 0)
   })).sort((a,b) => (parseInt(a.stateCode)||0) - (parseInt(b.stateCode)||0));
+
+  const numCell = (val) =>
+    `<td class="num">${val != null ? val.toLocaleString() : '—'}</td>`;
 
   // Total row
   const totalRow = `<tr style="background:#dde3ea;font-weight:700;border-bottom:2px solid #ccd0d5">
@@ -3074,14 +3570,37 @@ function showReport(historyEntry) {
       </tr>`).join('')
   ).join('');
 
+  // Map each metric card to the layer key whose failure would make its
+  // number unreliable, so we can flag the specific card(s) affected rather
+  // than only a generic top-of-report banner.
+  const failedKeys = new Set((historyEntry.layerFailures || []).map(f => f.key));
+  const cardWarn = key => failedKeys.has(key)
+    ? ` border:1.5px solid #b94527;` : '';
+  const cardBadge = key => failedKeys.has(key)
+    ? `<div style="font-size:9px;color:#b94527;font-weight:700;margin-top:2px">⚠ DATA UNAVAILABLE</div>` : '';
+
+  const failureBanner = historyEntry.layerFailures?.length ? `
+    <div style="background:#fdecea;border:1.5px solid #b94527;border-radius:6px;padding:12px 16px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
+      <div style="font-size:18px;line-height:1;color:#b94527">⚠</div>
+      <div>
+        <div style="font-weight:700;color:#7a2e19;font-size:13px;margin-bottom:4px">
+          This report is incomplete — ${historyEntry.layerFailures.length} data source${historyEntry.layerFailures.length !== 1 ? 's' : ''} could not be retrieved
+        </div>
+        <div style="font-size:11px;color:#7a2e19;line-height:1.5">
+          ${historyEntry.layerFailures.map(f => `<div>• <b>${f.name}</b> — figures below show 0 for this layer and should not be treated as a true zero (${f.reason})</div>`).join('')}
+        </div>
+      </div>
+    </div>` : '';
+
   document.getElementById('reportBody').innerHTML = `
+    ${failureBanner}
     <div class="report-meta">
       <div class="meta-card"><div class="val">${totalArea.toLocaleString()} sq km</div><div class="lbl">AOI Area</div></div>
-      <div class="meta-card"><div class="val">${totalA.toLocaleString()}</div><div class="lbl">Aged Care Services</div></div>
-      <div class="meta-card"><div class="val">${totalH.toLocaleString()}</div><div class="lbl">Total Hospitals</div></div>
-      <div class="meta-card"><div class="val">${totalF.toLocaleString()}</div><div class="lbl">Major Power Stations</div></div>
-      <div class="meta-card"><div class="val">${totalC.toLocaleString()}</div><div class="lbl">Est. Population (2025)</div></div>
-      <div class="meta-card"><div class="val">${totalD.toLocaleString()}</div><div class="lbl">Address Points</div></div>
+      <div class="meta-card" style="${cardWarn('A')}"><div class="val">${totalA.toLocaleString()}</div><div class="lbl">Aged Care Services</div>${cardBadge('A')}</div>
+      <div class="meta-card" style="${cardWarn('B')}${cardWarn('E')}"><div class="val">${totalH.toLocaleString()}</div><div class="lbl">Total Hospitals</div>${cardBadge('B')}${cardBadge('E')}</div>
+      <div class="meta-card" style="${cardWarn('F')}"><div class="val">${totalF.toLocaleString()}</div><div class="lbl">Major Power Stations</div>${cardBadge('F')}</div>
+      <div class="meta-card" style="${cardWarn('C')}"><div class="val">${totalC.toLocaleString()}</div><div class="lbl">Est. Population (2025)</div>${cardBadge('C')}</div>
+      <div class="meta-card" style="${cardWarn('D')}"><div class="val">${totalD.toLocaleString()}</div><div class="lbl">Address Points</div>${cardBadge('D')}</div>
     </div>
     <div class="report-table-wrap"><table>
       <thead><tr>
@@ -3097,7 +3616,7 @@ function showReport(historyEntry) {
         <th>Population</th>
         <th>Addresses</th>
       </tr></thead>
-      <tbody>${totalRow}${allStateRows}${allLGARows}${outsideRow}</tbody>
+      <tbody>${totalRow}${allStateRows}${allLGARows}</tbody>
     </table></div>`;
 
   document.getElementById('reportModal').classList.add('open');
@@ -3122,6 +3641,42 @@ function renderHistoryList() {
     </div>`).join('');
 }
 
+// ═══════════════════════════════════════════════════════════
+// DATA SOURCES PANEL
+// ═══════════════════════════════════════════════════════════
+// Static attribution only (publisher, description, dataset link) from
+// CONFIG.layers[key].attribution. We don't fetch a live "last updated"
+// date from each ArcGIS service — several didn't reliably report one,
+// so anyone who wants that detail can follow the dataset page link below.
+function toggleDataSources() {
+  const panel = document.getElementById('dataSourcesPanel');
+  const body  = document.getElementById('dataSourcesBody');
+  const open  = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  panel.classList.toggle('open', !open);
+  if (!open) renderDataSources();
+}
+
+function renderDataSources() {
+  const body = document.getElementById('dataSourcesBody');
+  if (!body) return;
+
+  const items = Object.entries(CONFIG.layers).map(([key, cfg]) => {
+    const attr = cfg.attribution || {};
+    const colorDot = cfg.color || 'var(--muted)';
+
+    return `
+      <div class="source-item">
+        <div class="source-name"><span class="source-dot" style="background:${colorDot}"></span>${cfg.name}</div>
+        <div class="source-meta">Publisher: ${attr.publisher || 'Unknown'}</div>
+        ${attr.description ? `<div class="source-meta">${attr.description}</div>` : ''}
+        ${attr.infoUrl ? `<div class="source-meta"><a href="${attr.infoUrl}" target="_blank" rel="noopener noreferrer">View dataset page ↗</a></div>` : ''}
+      </div>`;
+  }).join('');
+
+  body.innerHTML = items;
+}
+
 function sortReport(col) {
   if (state.sortCol===col) state.sortAsc=!state.sortAsc;
   else { state.sortCol=col; state.sortAsc=col==='lga'; }
@@ -3142,11 +3697,7 @@ function exportCSV() {
   const cols = ['Reporting Level','State','Location Name','AOI Area (sq km)','Aged Care','Hospitals (Total)','Public Hospitals','Private Hospitals','Power Stations','Est. Population (2025)','Address Points'];
   const vals = (level, st, name, r, area='') => [level, st, name, area, r.countA, r.countHospital, r.countB, r.countE, r.countF, r.countC, r.countD];
 
-  // Separate Outside LGA from valid data
-  const csvOutside  = data.find(r => r.lga === 'Outside LGA');
-  const csvValid    = data.filter(r => r.lga !== 'Outside LGA');
-
-  // Grand total (all data including outside)
+  // Grand total
   const grand = {
     countA:        data.reduce((s,r)=>s+r.countA,0),
     countHospital: data.reduce((s,r)=>s+r.countHospital,0),
@@ -3157,9 +3708,9 @@ function exportCSV() {
     countD:        data.reduce((s,r)=>s+r.countD,0)
   };
 
-  // Group valid LGAs by state
+  // Group LGAs by state, track stateCode per group
   const byState = {};
-  for (const r of csvValid) {
+  for (const r of data) {
     const s = r.stateName || 'Unknown';
     if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
     byState[s].lgas.push(r);
@@ -3203,19 +3754,29 @@ function exportCSV() {
     }
   }
 
-  // Outside LGA row at the bottom
-  if (csvOutside) {
-    rows.push(vals('Outside', 'Outside', 'Outside', csvOutside, csvOutside.lgaArea ?? ''));
+  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+
+  // CSV has no styling, so a failed-layer warning has to be plain text rows
+  // above the data — clearly marked so they're unmistakable as a warning
+  // rather than a data row, and easy to spot if someone scans column A.
+  let warningBlock = '';
+  if (entry.layerFailures?.length) {
+    const w = [
+      ['*** WARNING: THIS REPORT IS INCOMPLETE ***'],
+      [`${entry.layerFailures.length} data source(s) could not be retrieved when this report was generated:`],
+      ...entry.layerFailures.map(f => [`  - ${f.name}: figures below show 0 and should NOT be treated as a true zero (${f.reason})`]),
+      ['']
+    ];
+    warningBlock = w.map(r => r.map(v => `"${v}"`).join(',')).join('\n') + '\n';
   }
 
-  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
   const ts  = entry.timestamp.toISOString().slice(0,10);
   const a   = Object.assign(document.createElement('a'), {
-    href:     URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})),
+    href:     URL.createObjectURL(new Blob([warningBlock + csv],{type:'text/csv;charset=utf-8;'})),
     download: `spatial_report_${ts}.csv`
   });
   a.click();
-  log('CSV exported', 'ok');
+  log(entry.layerFailures?.length ? 'CSV exported (with data-gap warning)' : 'CSV exported', 'ok');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3367,8 +3928,153 @@ function flattenToSingleFeature(g) {
   }
   return { type:'Feature', geometry:g, properties:{} };
 }
-function countVertices(f) { return (JSON.stringify(f.geometry?.coordinates||[]).match(/\[/g)||[]).length; }
+function countVertices(f) {
+  if (f?.type === 'FeatureCollection') {
+    return f.features.reduce((s, feat) => s + countVertices(feat), 0);
+  }
+  return (JSON.stringify(f.geometry?.coordinates||[]).match(/\[/g)||[]).length;
+}
 function setStatus(s) { const p=document.getElementById('statusPill'); p.className='status-pill '+s; p.textContent=s.toUpperCase(); }
+
+// Shared yield helper used throughout long-running loops (dissolve, analysis,
+// layer tagging). Yields to the browser via setTimeout(0) AND repaints the
+// busy-overlay timer on every call — this is what keeps the timer display
+// fresh during heavy synchronous work, since a plain setInterval can get
+// starved/delayed when the main thread is busy with exactly this kind of
+// loop. tickBusyTimer() is a no-op when the overlay isn't showing.
+function globalTick() {
+  return new Promise(r => setTimeout(() => { tickBusyTimer(); r(); }, 0));
+}
+
+// ── Busy overlay — blocks map clicks/drags during long operations ──
+// Distinct from the progress bars (which show *what's* happening); this
+// is purely about preventing input from queuing up against an unresponsive
+// map while a long synchronous chunk of work is mid-flight.
+let _busyDepth = 0; // supports nested show/hide calls without flicker
+let _busyStartedAt = null;
+let _busyTimerInterval = null;
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+function tickBusyTimer() {
+  const el = document.getElementById('busyTimer');
+  if (!el || !_busyStartedAt) return;
+  el.textContent = formatElapsed(Date.now() - _busyStartedAt);
+}
+
+function showBusy(text, subtext) {
+  _busyDepth++;
+  const overlay = document.getElementById('busyOverlay');
+  const t  = document.getElementById('busyText');
+  const st = document.getElementById('busySubtext');
+  if (t)  t.textContent  = text || 'Working…';
+  if (st) st.textContent = subtext || '';
+  if (overlay) overlay.classList.add('visible');
+
+  // Start the timer fresh only on the outermost show (depth went 0 -> 1) —
+  // a nested showBusy call mid-operation shouldn't reset the clock.
+  if (_busyDepth === 1) {
+    _busyStartedAt = Date.now();
+    tickBusyTimer();
+    if (_busyTimerInterval) clearInterval(_busyTimerInterval);
+    _busyTimerInterval = setInterval(tickBusyTimer, 1000);
+  }
+}
+function updateBusy(text, subtext) {
+  const t  = document.getElementById('busyText');
+  const st = document.getElementById('busySubtext');
+  if (t && text != null)  t.textContent  = text;
+  if (st && subtext != null) st.textContent = subtext;
+  tickBusyTimer(); // piggyback a timer repaint on every status update
+}
+function hideBusy(force) {
+  _busyDepth = force ? 0 : Math.max(0, _busyDepth - 1);
+  if (_busyDepth === 0) {
+    document.getElementById('busyOverlay')?.classList.remove('visible');
+    if (_busyTimerInterval) { clearInterval(_busyTimerInterval); _busyTimerInterval = null; }
+    if (_busyStartedAt) {
+      log(`Took ${formatElapsed(Date.now() - _busyStartedAt)}`, 'info');
+      _busyStartedAt = null;
+    }
+  }
+}
+
+// Minimum elapsed time before the "AOI ready" confirmation is worth showing —
+// sub-second builds don't need a click-to-dismiss popup, the badge/console
+// log is enough. Anything that actually locked the map for a noticeable
+// stretch gets the explicit confirmation.
+const AOI_DONE_POPUP_MIN_MS = 2000;
+
+function showAOIDone(elapsedMs) {
+  if (elapsedMs < AOI_DONE_POPUP_MIN_MS) return;
+  const subtext = document.getElementById('aoiDoneSubtext');
+  if (subtext) subtext.textContent = `Finished in ${formatElapsed(elapsedMs)}`;
+  document.getElementById('aoiDoneOverlay')?.classList.add('visible');
+}
+function dismissAOIDone() {
+  document.getElementById('aoiDoneOverlay')?.classList.remove('visible');
+}
+
+// ── Toast notifications — non-blocking data-source failure alerts ──
+// Fired the moment a layer fetch fails, whether at page load, on zoom-in,
+// or mid-analysis. Deliberately NOT a blocking dialog: by the time a fetch
+// fails there's no in-flight operation to meaningfully "stop", and the
+// other layers' fetches continue regardless (each is independently
+// try/catch-wrapped — see runAnalysis/loadAllLayers/loadPointLayers). The
+// permanent record of what failed lives in the report banner and CSV
+// export (see showReport/exportCSV); this toast is just the in-the-moment
+// heads-up so the person doesn't have to be watching the console to know.
+let _toastCounter = 0;
+const TOAST_AUTO_DISMISS_MS = 9000;
+
+function showToast(title, text, opts = {}) {
+  const stack = document.getElementById('toastStack');
+  if (!stack) return;
+
+  const id = `toast-${++_toastCounter}`;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.id = id;
+  el.innerHTML = `
+    <div class="toast-icon">⚠</div>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-text">${text}</div>
+    </div>
+    <button class="toast-close" onclick="dismissToast('${id}')" title="Dismiss">✕</button>`;
+  stack.appendChild(el);
+
+  if (!opts.sticky) {
+    setTimeout(() => dismissToast(id), TOAST_AUTO_DISMISS_MS);
+  }
+  return id;
+}
+
+function dismissToast(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), 220); // matches toast-out animation duration
+}
+
+// Specific helper for the data-source-failure case — consistent wording
+// everywhere it's called, and logs to the console too (so the full history
+// is still there for anyone checking later, same as before this existed).
+function notifyDataSourceFailure(layerName, reason) {
+  log(`⚠ ${layerName} could not be retrieved: ${reason}`, 'error');
+  showToast(
+    `${layerName} unavailable`,
+    `This data source could not be reached. It may be temporarily down — try again in a few minutes. Any report generated now will be missing this layer.`
+  );
+}
+
 function log(msg, type='info') {
   const el=document.getElementById('logScroll');
   const ts=new Date().toLocaleTimeString('en-AU',{hour12:false});
@@ -3514,80 +4220,5 @@ document.addEventListener('click', e => {
 });
 window.addEventListener('load', initMap);
 </script>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- TEMPORARY — DRAFT BANNER + SPLASH SCREEN                    -->
-<!-- Remove this entire block for final product                  -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-
-<!-- Bottom draft banner -->
-<div style="position:fixed;bottom:0;left:0;right:0;z-index:9999;
-            background:#e05c5c;color:#fff;text-align:center;
-            font-family:Arial,monospace;font-size:11px;font-weight:700;
-            padding:5px;letter-spacing:0.05em;pointer-events:none">
-  ⚠ &nbsp; DRAFT PROOF OF CONCEPT — NOT FOR OPERATIONAL USE — DATA AND RESULTS UNVALIDATED &nbsp; ⚠
-</div>
-
-<!-- Splash modal -->
-<div id="splashScreen" style="
-  position:fixed;inset:0;z-index:99999;
-  background:rgba(0,0,0,0.55);
-  display:flex;align-items:center;justify-content:center;
-  padding:20px;font-family:Arial,sans-serif;">
-
-  <div style="
-    background:#003E5A;
-    border:1px solid #00797A;
-    border-radius:12px;
-    max-width:480px;width:100%;
-    box-shadow:0 8px 40px rgba(0,0,0,0.5);
-    overflow:hidden;">
-
-    <!-- Header bar -->
-    <div style="background:#00797A;padding:14px 24px;display:flex;align-items:center;gap:10px">
-      <div style="font-size:18px;font-weight:900;letter-spacing:0.06em;color:#fff">
-        EXPOSURE REPORTER
-      </div>
-      <div style="font-size:10px;background:#f2af00;color:#003E5A;font-weight:800;
-                  padding:2px 8px;border-radius:3px;letter-spacing:0.06em;white-space:nowrap">
-        DRAFT
-      </div>
-    </div>
-
-    <!-- Body -->
-    <div style="padding:24px 24px 20px">
-      <div style="font-size:13px;font-weight:700;color:#f2af00;margin-bottom:10px;letter-spacing:0.04em">
-        ⚠ &nbsp; Important Notice
-      </div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.75">
-        This tool is a <strong style="color:#fff">draft proof of concept</strong> for evaluation
-        and testing purposes only.
-        <br><br>
-        Data sources, spatial analysis methods, and results have
-        <strong style="color:#fff">not been validated</strong> for operational use.
-        Results should not be used to inform decisions without independent verification.
-        <br><br>
-        Functionality, data, and outputs may change without notice.
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <div style="padding:0 24px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div style="font-size:10px;color:rgba(255,255,255,0.35);line-height:1.4">
-        For evaluation purposes only<br>Not for operational use
-      </div>
-      <button onclick="document.getElementById('splashScreen').style.display='none'"
-              style="background:#f2af00;color:#003E5A;border:none;border-radius:6px;
-                     padding:10px 24px;font-size:12px;font-weight:800;cursor:pointer;
-                     letter-spacing:0.05em;white-space:nowrap;flex-shrink:0"
-              onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-        I Understand
-      </button>
-    </div>
-
-  </div>
-</div>
-<!-- END TEMPORARY DRAFT BLOCK -->
-
 </body>
 </html>
