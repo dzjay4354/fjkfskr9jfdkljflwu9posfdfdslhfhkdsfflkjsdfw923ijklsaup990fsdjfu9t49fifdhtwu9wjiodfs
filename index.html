@@ -1938,6 +1938,304 @@ async function loadPointLayers() {
   setStatus('ready');
 }
 
+// ArcGIS error responses don't always populate `message` — particularly for
+// size/complexity rejections, where the useful detail is often in `details`
+// instead, leaving `message` empty. A bare `new Error('')` produces a
+// failure banner with no visible reason, which is exactly what was
+// happening for Address Points on large AOIs. Used everywhere a fetch can
+// return a structured ArcGIS error, so the reason is always diagnosable.
+function arcgisErrorReason(data) {
+  return data.error?.message
+    || (Array.isArray(data.error?.details) && data.error.details.join('; '))
+    || `ArcGIS error code ${data.error?.code ?? 'unknown'}`;
+}
+
+// ── Retry wrapper for individual fetch() calls ──────────────────────
+// Root cause of "Address Points: Failed to fetch" on large areas (and not
+// small ones): a large AOI needs many pages, fetched in batches of
+// PARALLEL_FETCH_MAX_CONCURRENT requests at once (or many sequential
+// requests in the fallback path). Promise.all is fail-fast — ANY single
+// request among the dozens/hundreds needed can hit a transient network
+// blip (a dropped connection, a brief DNS hiccup, a momentary CORS
+// preflight failure — these show up to JS as the generic browser error
+// "TypeError: Failed to fetch", not an HTTP status, since the request
+// never got an HTTP response at all) and that one failure aborted the
+// ENTIRE fetch with no retry. More pages = more independent chances for
+// this to happen, which is exactly why small areas (few pages) almost
+// never hit it and large areas (many pages) hit it regularly.
+// Fix: retry each individual request a few times with a short backoff
+// before giving up on it. A real, persistent failure (the service is
+// actually down, or returns a real ArcGIS error) still fails normally —
+// this only absorbs transient, one-off network blips.
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_DELAY_MS = 400;
+
+async function fetchWithRetry(url) {
+  let lastErr;
+  for (let attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const resp = await fetch(url);
+      // Treat 5xx and 429 (rate limited) as retryable too, alongside the
+      // network-level failures already caught below — a one-off server
+      // hiccup or a transient rate-limit response shouldn't kill the whole
+      // fetch any more than a dropped connection should.
+      if (!resp.ok && (resp.status >= 500 || resp.status === 429) && attempt < FETCH_RETRY_ATTEMPTS) {
+        lastErr = new Error(`HTTP ${resp.status}`);
+        await new Promise(r => setTimeout(r, FETCH_RETRY_BASE_DELAY_MS * attempt));
+        continue;
+      }
+      return resp; // success, or a non-retryable failure (4xx other than 429) — let the caller handle resp.ok
+    } catch (e) {
+      // Network-level failure (TypeError: Failed to fetch, etc.) — retry
+      lastErr = e;
+      if (attempt < FETCH_RETRY_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, FETCH_RETRY_BASE_DELAY_MS * attempt));
+      }
+    }
+  }
+  throw lastErr; // exhausted retries — this is now a genuine, persistent failure
+}
+
+// ── Parallel bbox-paged fetch ──────────────────────────────────────
+// The previous approach fetched pages strictly sequentially (page 2 didn't
+// start until page 1 fully returned) — for a layer like Address Points,
+// a large AOI can mean tens of thousands of records / dozens of pages,
+// and each round-trip pays full network latency one at a time. This was
+// the dominant cost, not the point-in-polygon math (which already uses a
+// spatial index for complex AOIs).
+//
+// Fix: ask ArcGIS for an exact match count first (returnCountOnly=true,
+// fast — no geometry returned), compute how many pages that requires, then
+// fire those page requests concurrently in capped batches (browsers cap
+// concurrent connections per host anyway, typically ~6, and hammering an
+// ArcGIS service with hundreds of simultaneous requests is more likely to
+// get them rejected than to help — MAX_CONCURRENT below is deliberately
+// conservative).
+//
+// Safety: ArcGIS's own docs note exceededTransferLimit can in rare cases
+// appear even when the returned count looks complete, so this still
+// verifies against exceededTransferLimit per page and falls back to the
+// existing sequential while-loop entirely if the upfront count query
+// fails or returns something nonsensical — count-based parallelism is a
+// fast path layered on top of the proven sequential approach, not a
+// wholesale replacement of it.
+const PARALLEL_FETCH_MAX_CONCURRENT = 6;
+const PARALLEL_FETCH_PAGE_SIZE = 2000;
+// Hard ceiling on total pages fetched (sequential fallback OR parallel),
+// regardless of what the server claims the count is — protects against a
+// runaway loop if a service behaves unexpectedly (see risk register R9).
+const PARALLEL_FETCH_MAX_PAGES = 500; // 500 * 2000 = up to 1,000,000 features
+
+async function fetchCountOnly(baseUrlAndParams) {
+  const url = `${baseUrlAndParams}&returnCountOnly=true`;
+  const resp = await fetchWithRetry(url);
+  if (!resp.ok) return null; // count query itself failed — caller falls back to sequential
+  const data = await resp.json();
+  if (data.error) return null;
+  const count = data.count ?? data.properties?.count;
+  return (typeof count === 'number' && count >= 0) ? count : null;
+}
+
+// Fetches every page for a bbox query against an ArcGIS layer, using
+// parallel batches when an upfront count is available, falling back to
+// the original sequential approach otherwise. `onProgress(fetchedCount)`
+// is called after every completed page (parallel or sequential) so the
+// UI can keep reporting progress the same way it did before.
+// Returns { features, missingPages, totalPages } instead of throwing on a
+// single bad page. Root cause this addresses: at large scale (e.g. NSW
+// Address Points, 1,500+ pages), even a small per-request failure rate
+// means SOME page failing all its retries becomes statistically likely
+// across that many independent requests — see the probability math in the
+// fix notes. The old all-or-nothing design meant one unlucky page out of
+// 1,500 successful ones discarded the entire fetch. Now: a page that still
+// fails after fetchWithRetry's retries is recorded, not thrown: it gets one
+// more retry pass after the main sweep (the load/throttling that likely
+// caused it may have eased by then), and only if STILL missing afterward
+// does it count toward missingPages. Callers can then proceed with a
+// partial result and report accurately ("X of Y pages retrieved") rather
+// than losing everything over a handful of pages.
+async function fetchPagedArcGIS(baseUrlAndParams, onProgress) {
+  const allFeatures = [];
+  const failedPageIndices = [];
+
+  const exactCount = await fetchCountOnly(baseUrlAndParams);
+
+  if (exactCount != null) {
+    // ── Fast path: known count, fetch pages concurrently ──
+    const totalPages = Math.min(
+      Math.ceil(exactCount / PARALLEL_FETCH_PAGE_SIZE),
+      PARALLEL_FETCH_MAX_PAGES
+    );
+    if (exactCount > PARALLEL_FETCH_MAX_PAGES * PARALLEL_FETCH_PAGE_SIZE) {
+      log(`⚠ Result count (${exactCount.toLocaleString()}) exceeds the safety cap — only the first ${(PARALLEL_FETCH_MAX_PAGES * PARALLEL_FETCH_PAGE_SIZE).toLocaleString()} features will be fetched`, 'warn');
+    }
+    log(`Fetching ${exactCount.toLocaleString()} features across ${totalPages.toLocaleString()} page(s), ${PARALLEL_FETCH_MAX_CONCURRENT} at a time…`, 'info');
+
+    const pageIndices = Array.from({ length: totalPages }, (_, i) => i);
+    const lastPageIndex = totalPages - 1;
+    let sawExceededAnomaly = false;
+
+    const fetchOnePage = async (pageIdx) => {
+      const offset = pageIdx * PARALLEL_FETCH_PAGE_SIZE;
+      const url = `${baseUrlAndParams}&resultOffset=${offset}&resultRecordCount=${PARALLEL_FETCH_PAGE_SIZE}`;
+      const resp = await fetchWithRetry(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} (page at offset ${offset})`);
+      const data = await resp.json();
+      if (data.error) throw new Error(arcgisErrorReason(data));
+      return data;
+    };
+
+    // Process in capped-concurrency batches. A single page's failure (after
+    // fetchWithRetry's own retries are exhausted) is caught HERE and
+    // recorded, not allowed to reject the whole Promise.all — that's the
+    // actual fix. The rest of the batch, and all subsequent batches, still
+    // proceed normally.
+    for (let i = 0; i < pageIndices.length; i += PARALLEL_FETCH_MAX_CONCURRENT) {
+      const batch = pageIndices.slice(i, i + PARALLEL_FETCH_MAX_CONCURRENT);
+      const batchResults = await Promise.all(batch.map(async (pageIdx) => {
+        try {
+          const data = await fetchOnePage(pageIdx);
+          return { pageIdx, data, ok: true };
+        } catch (e) {
+          return { pageIdx, error: e, ok: false };
+        }
+      }));
+
+      for (const result of batchResults) {
+        if (!result.ok) {
+          failedPageIndices.push(result.pageIdx);
+          continue;
+        }
+        const { pageIdx, data } = result;
+        const page = data.features || [];
+        allFeatures.push(...page);
+        // exceededTransferLimit=true is EXPECTED on every page except the
+        // genuinely last one when paginating a large result set — see
+        // earlier note. Only a real anomaly on the last expected page.
+        const pageExceeded = data.properties?.exceededTransferLimit === true || data.exceededTransferLimit === true;
+        if (pageIdx === lastPageIndex && pageExceeded) {
+          sawExceededAnomaly = true;
+        }
+        if (onProgress) onProgress(allFeatures.length);
+      }
+      await globalTick();
+    }
+
+    if (sawExceededAnomaly) {
+      log(`⚠ Server reported more results than the upfront count indicated — falling back to sequential fetch to make sure nothing was missed`, 'warn');
+      return fetchPagedArcGISSequential(baseUrlAndParams, onProgress);
+    }
+
+    // ── Recovery pass: retry any pages that failed during the main sweep ──
+    // By the time the main sweep finishes, whatever caused those pages to
+    // fail (transient load, momentary throttling) has often eased. One
+    // more attempt, sequentially this time (gentler on the server than
+    // another concurrent batch), before giving up on them for good.
+    if (failedPageIndices.length > 0) {
+      log(`⚠ ${failedPageIndices.length} of ${totalPages} page(s) failed after retries — attempting one more recovery pass…`, 'warn');
+      const stillMissing = [];
+      for (const pageIdx of failedPageIndices) {
+        try {
+          const data = await fetchOnePage(pageIdx);
+          const page = data.features || [];
+          allFeatures.push(...page);
+          if (onProgress) onProgress(allFeatures.length);
+        } catch (e) {
+          stillMissing.push(pageIdx);
+        }
+        await globalTick();
+      }
+      if (stillMissing.length > 0) {
+        log(`⚠ ${stillMissing.length} of ${totalPages} page(s) could not be retrieved even after recovery — proceeding with partial data`, 'warn');
+      } else {
+        log(`Recovery pass succeeded — all pages now retrieved`, 'ok');
+      }
+      return { features: allFeatures, missingPages: stillMissing.length, totalPages };
+    }
+
+    return { features: allFeatures, missingPages: 0, totalPages };
+  }
+
+  // ── Fallback: count query failed, use the original sequential approach ──
+  log('Could not get an upfront result count — fetching sequentially', 'info');
+  return fetchPagedArcGISSequential(baseUrlAndParams, onProgress);
+}
+
+// The original sequential pagination approach — used when an upfront count
+// isn't available, and as the recovery path if parallel fetching's
+// count-based page math turns out to be wrong. Also resilient to individual
+// page failures: a page that fails even after fetchWithRetry's retries is
+// skipped (not thrown), with one more attempt at the very end for any pages
+// that were skipped — same recovery strategy as the parallel path, so a
+// long sequential fetch doesn't lose everything to one bad page either.
+// Termination relies on PARALLEL_FETCH_MAX_PAGES as a hard backstop if a
+// failed page's true "is there more after this" status can't be known.
+async function fetchPagedArcGISSequential(baseUrlAndParams, onProgress) {
+  let offset = 0, exceeded = true, allFeatures = [], pages = 0;
+  const failedOffsets = [];
+
+  while (exceeded) {
+    if (pages >= PARALLEL_FETCH_MAX_PAGES) {
+      log(`⚠ Reached the safety cap of ${PARALLEL_FETCH_MAX_PAGES} pages — stopping fetch`, 'warn');
+      break;
+    }
+    const url = `${baseUrlAndParams}&resultOffset=${offset}&resultRecordCount=${PARALLEL_FETCH_PAGE_SIZE}`;
+    let page = [];
+    // Default to "assume there's more" on a failed page — we genuinely
+    // don't know whether it was the last page, and continuing is safer
+    // than stopping early and silently truncating the result. The
+    // MAX_PAGES cap above is the backstop against this looping forever.
+    let pageExceeded = true;
+
+    try {
+      const resp = await fetchWithRetry(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(arcgisErrorReason(data));
+      page = data.features || [];
+      allFeatures = allFeatures.concat(page);
+      pageExceeded = data.properties?.exceededTransferLimit === true
+                  || data.exceededTransferLimit === true
+                  || page.length === PARALLEL_FETCH_PAGE_SIZE;
+    } catch (e) {
+      log(`⚠ Page at offset ${offset} failed after retries — will retry once more at the end`, 'warn');
+      failedOffsets.push(offset);
+    }
+
+    offset += PARALLEL_FETCH_PAGE_SIZE; // always advance by a full page-worth, regardless of success/failure, to keep offsets aligned
+    pages++;
+    if (onProgress) onProgress(allFeatures.length);
+    await globalTick();
+    exceeded = pageExceeded;
+    // A genuinely empty successful page (not a failure) means we've reached
+    // the real end of the result set — stop regardless of the exceeded flag.
+    if (page.length === 0 && failedOffsets[failedOffsets.length - 1] !== offset - PARALLEL_FETCH_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  let stillMissing = 0;
+  if (failedOffsets.length > 0) {
+    log(`⚠ ${failedOffsets.length} page(s) failed during sequential fetch — attempting recovery pass…`, 'warn');
+    for (const failedOffset of failedOffsets) {
+      try {
+        const url = `${baseUrlAndParams}&resultOffset=${failedOffset}&resultRecordCount=${PARALLEL_FETCH_PAGE_SIZE}`;
+        const resp = await fetchWithRetry(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(arcgisErrorReason(data));
+        allFeatures = allFeatures.concat(data.features || []);
+        if (onProgress) onProgress(allFeatures.length);
+      } catch (e) {
+        stillMissing++;
+      }
+      await globalTick();
+    }
+  }
+
+  return { features: allFeatures, missingPages: stillMissing, totalPages: pages };
+}
+
 async function fetchGeoJSON(key) {
   const cfg      = CONFIG.layers[key];
   const pageSize = 2000;
@@ -1946,10 +2244,10 @@ async function fetchGeoJSON(key) {
   while (exceeded) {
     const sep  = cfg.url.includes('?') ? '&' : '?';
     const url  = `${cfg.url}${sep}resultOffset=${offset}&resultRecordCount=${pageSize}`;
-    const resp = await fetch(url);
+    const resp = await fetchWithRetry(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${cfg.name}`);
     const data = await resp.json();
-    if (data.error) throw new Error(data.error.message || 'ArcGIS error');
+    if (data.error) throw new Error(arcgisErrorReason(data));
 
     const page = data.features || [];
     allFeatures = allFeatures.concat(page);
@@ -1979,10 +2277,10 @@ async function fetchGeoJSONWithBbox(key, aoiFeature) {
     where:        '1=1',
     f:            'geojson'
   });
-  const resp = await fetch(`${cfg.urlBase}?${params}`);
+  const resp = await fetchWithRetry(`${cfg.urlBase}?${params}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${cfg.name}`);
   const data = await resp.json();
-  if (data.error) throw new Error(data.error.message || 'ArcGIS error');
+  if (data.error) throw new Error(arcgisErrorReason(data));
   if (data.exceededTransferLimit) log(`${cfg.name}: transfer limit reached — results may be incomplete`, 'warn');
   return data;
 }
@@ -3156,42 +3454,35 @@ async function runAnalysis() {
       log(`${cfg.name}: ${count} of ${total.toLocaleString()} features inside AOI`, 'ok');
     }
 
-    // ── Layer C: Population grid points — pre-loaded, sum pop field ──
-    // ── Layer C: Population — on-demand bbox fetch, paginated, sum pop field ──
+    // ── Layer C: Population grid points — bbox fetch, paginated, sum pop field ──
+    // Fetching now goes through fetchPagedArcGIS (see definition near
+    // fetchGeoJSON) — gets an exact result count upfront and fires pages
+    // concurrently instead of sequentially, same fix applied to Address
+    // Points below.
     setProgress(fill, lbl, 55, 'Fetching Population within AOI…');
     await tick();
 
     try {
       const bbox    = turf.bbox(analysisAOI);
       const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
-      const pageSize = 2000;
-      let offset = 0, popPoints = [], exceeded = true;
+      const baseParams = `${CONFIG.layers.C.url}`
+        + `?outFields=pop&where=1%3D1&f=geojson`
+        + `&geometry=${encodeURIComponent(bboxStr)}`
+        + `&geometryType=esriGeometryEnvelope`
+        + `&spatialRel=esriSpatialRelIntersects`;
 
-      while (exceeded) {
-        const url = `${CONFIG.layers.C.url}`
-          + `?outFields=pop&where=1%3D1&f=geojson`
-          + `&geometry=${encodeURIComponent(bboxStr)}`
-          + `&geometryType=esriGeometryEnvelope`
-          + `&spatialRel=esriSpatialRelIntersects`
-          + `&resultOffset=${offset}&resultRecordCount=${pageSize}`;
-
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-
-        const page = data.features || [];
-        popPoints = popPoints.concat(page);
-        // Continue if: service says exceeded, OR we got a full page (may be more records)
-        exceeded = data.properties?.exceededTransferLimit === true
-                || data.exceededTransferLimit === true
-                || page.length === pageSize;
-        offset += page.length;
-
-        setProgress(fill, lbl, Math.min(55 + Math.round(offset / 50), 84),
-          `Population: ${popPoints.length.toLocaleString()} points fetched…`);
-        await tick();
-        if (page.length === 0) break;
+      const fetchResult = await fetchPagedArcGIS(baseParams, (fetchedCount) => {
+        setProgress(fill, lbl, Math.min(55 + Math.round(fetchedCount / 200), 84),
+          `Population: ${fetchedCount.toLocaleString()} points fetched…`);
+      });
+      const popPoints = fetchResult.features;
+      if (fetchResult.missingPages > 0) {
+        // Partial data, not a total failure — proceed with what we have,
+        // but flag it distinctly so the report banner is accurate about
+        // "some data missing" rather than either silence or "all missing".
+        const msg = `${fetchResult.missingPages} of ${fetchResult.totalPages} page(s) could not be retrieved — figures are a partial undercount`;
+        log(`⚠ Population: ${msg}`, 'warn');
+        runFailures.push({ key: 'C', name: CONFIG.layers.C.name, reason: msg });
       }
 
       log(`Population: ${popPoints.length.toLocaleString()} points in bbox, running exact intersection…`, 'info');
@@ -3234,37 +3525,39 @@ async function runAnalysis() {
     }
 
     // ── Layer D: Address Points — bbox fetch + exact intersection, count ──
+    // Only geometry and a minimal field are needed: pointInAOI()/findLGA()
+    // only ever read coordinates, never properties, and address points are
+    // never rendered as a map layer (no popup to populate). outFields is
+    // trimmed to OBJECTID for the same reason.
+    //
+    // Fetching now goes through fetchPagedArcGIS, which gets an exact
+    // result count upfront and fires pages concurrently (capped) instead
+    // of one at a time — for a large AOI returning tens of thousands of
+    // address points across dozens of pages, this was the dominant cost,
+    // well above the point-in-polygon math itself.
     setProgress(fill, lbl, 92, 'Fetching Address Points within AOI…');
     await tick();
 
     try {
       const bbox    = turf.bbox(analysisAOI);
       const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
-      const pageSize = 2000;
-      let offset = 0, exceeded = true, addrPoints = [];
+      const baseParams = `${CONFIG.layers.D.urlBase}`
+        + `?outFields=OBJECTID&where=1%3D1&f=geojson`
+        + `&geometry=${encodeURIComponent(bboxStr)}`
+        + `&geometryType=esriGeometryEnvelope`
+        + `&spatialRel=esriSpatialRelIntersects`;
 
-      while (exceeded) {
-        const url = `${CONFIG.layers.D.urlBase}`
-          + `?outFields=*&where=1%3D1&f=geojson`
-          + `&geometry=${encodeURIComponent(bboxStr)}`
-          + `&geometryType=esriGeometryEnvelope`
-          + `&spatialRel=esriSpatialRelIntersects`
-          + `&resultOffset=${offset}&resultRecordCount=${pageSize}`;
-
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error.message);
-
-        const page = data.features || [];
-        addrPoints = addrPoints.concat(page);
-        // Continue if: service explicitly says exceeded, OR we got a full page (may be more)
-        exceeded = data.exceededTransferLimit === true || page.length === pageSize;
-        offset += page.length;
-        if (page.length === 0) break;
-
-        setProgress(fill, lbl, 92, `Address Points: ${addrPoints.length.toLocaleString()} fetched…`);
-        await tick();
+      const fetchResult = await fetchPagedArcGIS(baseParams, (fetchedCount) => {
+        setProgress(fill, lbl, 92, `Address Points: ${fetchedCount.toLocaleString()} fetched…`);
+      });
+      const addrPoints = fetchResult.features;
+      if (fetchResult.missingPages > 0) {
+        // Partial data, not a total failure — proceed with what we have
+        // (1,499 of 1,500 pages is still a vastly more useful number than
+        // the old behaviour of discarding everything over one bad page).
+        const msg = `${fetchResult.missingPages} of ${fetchResult.totalPages} page(s) could not be retrieved — figures are a partial undercount`;
+        log(`⚠ Address Points: ${msg}`, 'warn');
+        runFailures.push({ key: 'D', name: CONFIG.layers.D.name, reason: msg });
       }
 
       log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact intersection…`, 'info');
@@ -3577,17 +3870,17 @@ function showReport(historyEntry) {
   const cardWarn = key => failedKeys.has(key)
     ? ` border:1.5px solid #b94527;` : '';
   const cardBadge = key => failedKeys.has(key)
-    ? `<div style="font-size:9px;color:#b94527;font-weight:700;margin-top:2px">⚠ DATA UNAVAILABLE</div>` : '';
+    ? `<div style="font-size:9px;color:#b94527;font-weight:700;margin-top:2px">⚠ MAY BE INCOMPLETE</div>` : '';
 
   const failureBanner = historyEntry.layerFailures?.length ? `
     <div style="background:#fdecea;border:1.5px solid #b94527;border-radius:6px;padding:12px 16px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
       <div style="font-size:18px;line-height:1;color:#b94527">⚠</div>
       <div>
         <div style="font-weight:700;color:#7a2e19;font-size:13px;margin-bottom:4px">
-          This report is incomplete — ${historyEntry.layerFailures.length} data source${historyEntry.layerFailures.length !== 1 ? 's' : ''} could not be retrieved
+          This report is incomplete — ${historyEntry.layerFailures.length} data source${historyEntry.layerFailures.length !== 1 ? 's' : ''} had a problem retrieving data
         </div>
         <div style="font-size:11px;color:#7a2e19;line-height:1.5">
-          ${historyEntry.layerFailures.map(f => `<div>• <b>${f.name}</b> — figures below show 0 for this layer and should not be treated as a true zero (${f.reason})</div>`).join('')}
+          ${historyEntry.layerFailures.map(f => `<div>• <b>${f.name}</b> — figures below may be incomplete and should be treated with caution (${f.reason})</div>`).join('')}
         </div>
       </div>
     </div>` : '';
@@ -3763,8 +4056,8 @@ function exportCSV() {
   if (entry.layerFailures?.length) {
     const w = [
       ['*** WARNING: THIS REPORT IS INCOMPLETE ***'],
-      [`${entry.layerFailures.length} data source(s) could not be retrieved when this report was generated:`],
-      ...entry.layerFailures.map(f => [`  - ${f.name}: figures below show 0 and should NOT be treated as a true zero (${f.reason})`]),
+      [`${entry.layerFailures.length} data source(s) had a problem retrieving data when this report was generated:`],
+      ...entry.layerFailures.map(f => [`  - ${f.name}: figures below may be incomplete and should be treated with caution (${f.reason})`]),
       ['']
     ];
     warningBlock = w.map(r => r.map(v => `"${v}"`).join(',')).join('\n') + '\n';
